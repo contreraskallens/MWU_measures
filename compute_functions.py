@@ -24,10 +24,5 @@ def get_KLD(array1, array2):
     KLD_norm = 1 - np.power(np.e, -KLD)
     return KLD_norm
 
-def get_entropy_dif(ngram_1_freqs, ngram_2, slot):
-    freqs_1 = ngram_1_freqs['freq']
-    entropy = get_entropy(freqs_1)
-    freqs_1_no2 = freqs_1[ngram_1_freqs[slot] != ngram_2]
-    entropy_cf = get_entropy(freqs_1_no2)
-    h_diff = entropy_cf - entropy
-    return h_diff
+def min_max_norm(target, this_min, this_max):
+    return (target - this_min) / (this_max - this_min) 
