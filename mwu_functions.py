@@ -118,24 +118,19 @@ def normalize_scores(bigram_scores, bigram_freqs, entropy_limits=None, scale_ent
 
     return normalized_scores
 
-
-def test():
-    print(process_corpus.unigram_frequencies_pc)
-# TODO: make these refer to the global variables in process_corpus
-# def get_mwu_scores(ngrams):
-#     all_scores = []
-#     i = 0
-#     for ngram in ngrams:
-#         print(ngram)
-#         print(i)
-#         comps = ngram.split(' ')
-#         if len(comps) == 2:
-#             bigram_scores = get_bigram_scores(comps[0], comps[1])
-#             all_scores.append(bigram_scores)
-#         else:
-#             bigram_1_score = get_bigram_scores(comps[0], comps[1])
-#             bigram_2_score = get_bigram_scores(comps[1], comps[2])
-#             all_scores.append(bigram_1_score)
-#             all_scores.append(bigram_2_score)
-#         i += 1
-#     return pd.DataFrame(all_scores)
+def get_mwu_scores(ngrams):
+    all_scores = []
+    i = 0
+    bigram_freqs_per_corpus = process_corpus.bigram_freqs_per_corpus
+    corpus_props = process_corpus.corpus_proportions
+    bigram_freqs_total = process_corpus.bigram_freqs_total
+    unigram_frequencies = process_corpus.unigram_frequencies
+    for ngram in ngrams:
+        print(ngram)
+        print(i)
+        comps = ngram.split(' ')
+        # TODO: Trigram info
+        bigram_scores = get_bigram_scores(comps[0], comps[1], bigram_freqs_per_corpus, corpus_props, bigram_freqs_total, unigram_frequencies)
+        all_scores.append(bigram_scores)
+        i += 1
+    return pd.DataFrame(all_scores)
