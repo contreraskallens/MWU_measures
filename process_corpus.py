@@ -1,9 +1,11 @@
 import numpy as np
 import numpy_groupies as npg
 import pandas as pd
-import nltk
+from nltk import FreqDist
 import preprocess_corpus
 import gc
+from collections import defaultdict
+
 
 # Assumes as input the kind of object outputted by preprocess_corpus.py (i.e, dictionary of corpus_id: list of sentences where each sentence is a list of unigrams)
 
@@ -20,32 +22,32 @@ import gc
 #         overall_freq.update(freq_dist)
 #     return frequency_pc, overall_freq
 
-def filter_ngrams(total_freq, pc_freq, threshold, verbose=False):
-    # in-place
-    if verbose:
-        n_grams_before = len(total_freq)
-        print('Filtering...')
-    filtered_ngrams = [ngram for ngram, freq in total_freq.items() if freq < threshold]
-    for ngram in filtered_ngrams:
-        total_freq.pop(ngram)
-        for corpus_dict in pc_freq.values():
-            corpus_dict.pop(ngram, None)
-    import gc
-    if verbose:
-        n_grams_after = len(total_freq)
-        print(f'Ngrams removed: {n_grams_before - n_grams_after}')
-        print('Garbage collecting...')
-    gc.collect()
+# def filter_ngrams(total_freq, pc_freq, threshold, verbose=False):
+#     # in-place
+#     if verbose:
+#         n_grams_before = len(total_freq)
+#         print('Filtering...')
+#     filtered_ngrams = [ngram for ngram, freq in total_freq.items() if freq < threshold]
+#     for ngram in filtered_ngrams:
+#         total_freq.pop(ngram)
+#         for corpus_dict in pc_freq.values():
+#             corpus_dict.pop(ngram, None)
+#     import gc
+#     if verbose:
+#         n_grams_after = len(total_freq)
+#         print(f'Ngrams removed: {n_grams_before - n_grams_after}')
+#         print('Garbage collecting...')
+#     gc.collect()
 
-def get_ids(unigram_freqs, bigram_freqs):
-    uq_unigrams = [gram for gram in sorted(unigram_freqs.keys())]
-    unigram_id = range(len(uq_unigrams))
-    unigram_id = dict(zip(uq_unigrams, unigram_id))
-    uq_bigrams = sorted(bigram_freqs.keys())
-    uq_bigrams = list(uq_bigrams)
-    bigram_id = range(len(uq_bigrams))
-    bigram_id = dict(zip(uq_bigrams, bigram_id))
-    return unigram_id, bigram_id
+# def get_ids(unigram_freqs, bigram_freqs):
+#     uq_unigrams = [gram for gram in sorted(unigram_freqs.keys())]
+#     unigram_id = range(len(uq_unigrams))
+#     unigram_id = dict(zip(uq_unigrams, unigram_id))
+#     uq_bigrams = sorted(bigram_freqs.keys())
+#     uq_bigrams = list(uq_bigrams)
+#     bigram_id = range(len(uq_bigrams))
+#     bigram_id = dict(zip(uq_bigrams, bigram_id))
+#     return unigram_id, bigram_id
 
 def get_bigram_info(bigram_freqs, unigram_ids, bigram_ids, by_corpus=True):
     bigram_info = []
@@ -75,25 +77,31 @@ def get_corpus_props(unigram_freqs_pc):
     return corpus_props
 
 
-# TODO: allow to skip process corpus by allocating
-
-def process_corpus(corpus='bnc', corpus_dir=None, verbose=False):
+def process_corpus(corpus='bnc', corpus_dir=None, verbose=False, test_corpus=None, chunk_size = 10000):
     # should make brown the default corpus because it's included in nltk
     print('Preprocessing the corpus')
     if corpus == 'bnc' and corpus_dir:
-        frequency_dists = preprocess_corpus.preprocess_bnc(corpus_dir, verbose=verbose)
-    
-    global bigram_per_corpus, bigram_total, corpus_proportions, unigram_frequencies_pc
-    
-    bigram_per_corpus = frequency_dists['bigram'][0] # These could be generators used only by get_bigram_info. Save RAM until allocating arrays. Can filter on callout from generator maybe.
-    bigram_total = frequency_dists['bigram'][1]
-    unigram_frequencies_pc = frequency_dists['unigram'][0]
-    unigram_total = frequency_dists['unigram'][1]
-    
-    print('Cleaning the ngrams...')
+        frequency_dists = preprocess_corpus.preprocess_bnc(corpus_dir, chunk_size=chunk_size, verbose=verbose)
+    if test_corpus:
+        frequency_dists = test_corpus
+    global bigram_per_corpus, corpus_proportions, unigram_frequencies_pc, unigram_total, bigram_fw, bigram_bw
+
+
+    unigram_frequencies_pc = frequency_dists[0]
+    bigram_per_corpus = frequency_dists[1]
     
     print('Getting everything ready for score extraction')
-    unigram_id, bigram_id = get_ids(unigram_total, bigram_total)
-    bigram_per_corpus = get_bigram_info(bigram_per_corpus, unigram_id, bigram_id, by_corpus=True)
-    bigram_total = get_bigram_info(bigram_total, unigram_id, bigram_id, by_corpus=False)
+
+    unigram_total = sum([dist for dist in unigram_frequencies_pc.values()], FreqDist())
+    
+    bigram_fw = defaultdict(lambda: defaultdict(FreqDist))
+    bigram_bw = defaultdict(lambda: defaultdict(FreqDist))
+    for corpus, corpus_dict in bigram_per_corpus.items():
+        for bigram, freq in corpus_dict.items():
+            bigram_fw[corpus][bigram[0]][bigram[1]] = freq
+            bigram_bw[corpus][bigram[1]][bigram[0]] = freq
     corpus_proportions = get_corpus_props(unigram_frequencies_pc)
+
+    # unigram_id, bigram_id = get_ids(unigram_total, bigram_total)
+    # bigram_per_corpus = get_bigram_info(bigram_per_corpus, unigram_id, bigram_id, by_corpus=True)
+    # bigram_total = get_bigram_info(bigram_total, unigram_id, bigram_id, by_corpus=False)

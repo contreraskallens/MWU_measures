@@ -1,8 +1,10 @@
 import re
 from collections import defaultdict
-from nltk import FreqDist
-from nltk.util import bigrams
-from nltk.util import trigrams
+from nltk import FreqDist, flatten
+from nltk.util import bigrams as get_bigrams
+from nltk.util import trigrams as get_trigrams
+from itertools import groupby
+
 # Objective for preprocessing is to turn a corpus into a list of sentences/paragraphs/etc divided by corpus section. Here I provided procedures to preprocess a couple of common corpora.
 
 def clean_bnc_line(this_line):
@@ -17,47 +19,30 @@ def clean_bnc_line(this_line):
     this_line = this_line.split()
     return this_line
 
-def preprocess_bnc(bnc_dir, verbose = False):
+def preprocess_bnc(bnc_dir, chunk_size = 10000, verbose = False):
     #for BNC, you want to provide the bnc_tokenized.txt file
     print('Reading and cleaning corpus...')
     unigram_freqs = defaultdict(FreqDist)
     bigram_freqs = defaultdict(FreqDist)
-    # trigram_freqs = defaultdict(FreqDist)
-    overall_unigram = FreqDist()
-    overall_bigram = FreqDist()
-    # overall_trigram = FreqDist()
-    
     with open('bnc_tokenized.txt', 'r') as corpus_file:
         i = 0
         while True:
-            lines = corpus_file.readlines(10000)
-        # Way more memory efficient: allocate freq dists immediately
-        # for line in corpus_file:
-        # TODO: process faster. groupby? chain? Maybe compute freqDist over the whole batch?
-            if not lines:
+            raw_lines = corpus_file.readlines(chunk_size)
+            if not raw_lines:
                 break
-            for line in lines:
-                this_corpus_id = re.match(r'(^.)', line).group(1)
-                clean_line = clean_bnc_line(line)
-                unigram_freq = FreqDist(clean_line)
-                unigram_freqs[this_corpus_id].update(unigram_freq)
-                overall_unigram.update(unigram_freq)
-                
-                bigram_freq = FreqDist(bigrams(clean_line))
-                bigram_freqs[this_corpus_id].update(bigram_freq)
-                overall_bigram.update(bigram_freq)
-                
-            # trigram_freq = FreqDist(trigrams(clean_line))
-            # trigram_freqs[this_corpus_id].update(trigram_freq)
-            # overall_trigram.update(trigram_freq)
+            org_items = groupby(raw_lines, key=lambda x: re.match(r'(^.)', x).group(1))
+            unigrams = {key: [clean_bnc_line(line) for line in group] for key, group in org_items}
+            bigrams = {key: [bigram for line in group for bigram in get_bigrams(line) if len(line) > 1] for key, group in unigrams.items()}
+            unigrams = {key: flatten(group) for key, group in unigrams.items()}
+            for corpus, unigrams in unigrams.items():
+                this_dist = FreqDist(unigrams)
+                unigram_freqs[corpus].update(this_dist)
+            for corpus, bigrams in bigrams.items():
+                this_dist = FreqDist(bigrams)
+                bigram_freqs[corpus].update(this_dist)
             
             if verbose:
-                i += len(lines)
+                i += len(raw_lines)
                 print(f'{i} lines processed')
-            # if (i % 100000 == 0) and verbose:
-            #     print(i)
-                
-            # i +=1
-            
 
-    return {'unigram': (unigram_freqs, overall_unigram), 'bigram': (bigram_freqs, overall_bigram)}#, 'trigram': (trigram_freqs, overall_trigram)}
+    return (unigram_freqs, bigram_freqs)
