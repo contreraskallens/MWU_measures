@@ -5,9 +5,14 @@ obtaining each measure and the main function for processing a list of ngrams.
 
 from collections import defaultdict
 from nltk import FreqDist
-
 import numpy as np
 import pandas as pd
+from pathos.multiprocessing import ProcessingPool as Pool
+from functools import partial
+from joblib import Parallel, delayed, parallel_config, dump, load
+import os
+# import dask
+# dask.config.set(scheduler='processes') 
 
 from .compute_functions import min_max_norm
 from . import compute_functions
@@ -16,7 +21,7 @@ from . import processing_corpus
 CONSOLIDATED_FW = None
 CONSOLIDATED_BW = None
 
-def get_dispersion(bigram_freq, token_freq):
+def get_dispersion(bigram_freq, token_freq, corpus_proportions):
     """
     Computes the "Dispersion" variable for an ngram as the
     KLD divergence between its occurrences in each corpus and
@@ -30,7 +35,7 @@ def get_dispersion(bigram_freq, token_freq):
     bigram_props = [(corpus, freq / token_freq) for corpus, freq in bigram_freq]
     bigram_props = pd.DataFrame(bigram_props, columns=['corpus', 'ngram_prop'])
     bigram_props = pd.merge(
-        processing_corpus.CORPUS_PROPORTIONS,
+        corpus_proportions,
         bigram_props,
         on='corpus',
         how='left'
@@ -59,7 +64,7 @@ def get_entropy_dif(ngram_1_freqs, ngram_2):
     h_diff = entropy_cf - entropy
     return h_diff
 
-def get_association(comp_1, comp_2, token_freq):
+def get_association(comp_1, comp_2, token_freq, unigram_frequencies):
     """
     Obtains the association between the components of a bigram as
     the KLD between joint occurrence and overall occurrence.
@@ -71,7 +76,7 @@ def get_association(comp_1, comp_2, token_freq):
         over the whole corpus. In the form of an nltk.FreqDist.
     :return: A tuple, (association_forward, association_backward).
     """
-    unigram_frequencies = processing_corpus.UNIGRAM_TOTAL
+    # unigram_frequencies = processing_corpus.UNIGRAM_TOTAL
     # joint probability is conditioned on the unigram frequencies
     prob_1_2 = token_freq / unigram_frequencies[comp_1]
     prob_2_1 = token_freq / unigram_frequencies[comp_2]
@@ -84,21 +89,22 @@ def get_association(comp_1, comp_2, token_freq):
     return assoc_f, assoc_b
 
 
-def get_bigram_scores(comp_1, comp_2, verbose=False):
+def get_bigram_scores(ngram, forward_dict, backward_dict, unigram_dict, corpus_proportions, verbose=False):
     """
     Function for computing the MWU measures for a target ngram. 
-    :param comp_1: String with the first component of the ngram.
-    :param comp_2: String with the second component of the ngram.
+    :param ngram: A string with the ngram to be analyzed.
     :returns: A dictionary with all MWU measures obtained:
         Token frequency, dispersion, type frequency for each slot,
         entropy difference for each slot, both directions of 
         association.
     """
-    forward_dict = processing_corpus.BIGRAM_FW
-    backward_dict = processing_corpus.BIGRAM_BW
-    bigram_freq = [(corpus, corpus_dict[comp_1][comp_2]) for
+    comps = ngram.split(' ')
+    comp_1 = comps[0]
+    comp_2 = comps[1]
+    # forward_dict = processing_corpus.BIGRAM_FW
+    # backward_dict = processing_corpus.BIGRAM_BW
+    bigram_freq = [(corpus, corpus_dict.get(comp_1, pd.Series(0)).get(comp_2, 0)) for
         corpus, corpus_dict in forward_dict.items()]
-
     # Token frequency
     token_freq = sum(freqs[1] for freqs in bigram_freq)
     if token_freq == 0:
@@ -106,11 +112,13 @@ def get_bigram_scores(comp_1, comp_2, verbose=False):
             print(f'{" ".join([comp_1, comp_2])}>> is not in the corpus')
         return None
     # Dispersion
-    dispersion = get_dispersion(bigram_freq, token_freq)
+    dispersion = get_dispersion(bigram_freq, token_freq, corpus_proportions)
 
     ## Need aggregate frequencies for the rest
-    freqs_ngram_1 = sum([corpus_dict[comp_1] for corpus_dict in forward_dict.values()], FreqDist())
-    freqs_ngram_2 = sum([corpus_dict[comp_2] for corpus_dict in backward_dict.values()], FreqDist())
+    freqs_ngram_1 = [FreqDist(dict(corpus_dict.get(comp_1, pd.Series(0)))) for corpus_dict in forward_dict.values()]
+    freqs_ngram_2 = [FreqDist(dict(corpus_dict.get(comp_2, pd.Series(0)))) for corpus_dict in backward_dict.values()]
+    freqs_ngram_1 = sum(freqs_ngram_1, FreqDist())
+    freqs_ngram_2 = sum(freqs_ngram_2, FreqDist())
 
     # Type frequencies
     typef_1 = freqs_ngram_2.B()
@@ -121,7 +129,7 @@ def get_bigram_scores(comp_1, comp_2, verbose=False):
     slot2_diff = get_entropy_dif(freqs_ngram_1, comp_2)
 
     # Association
-    assoc_f, assoc_b = get_association(comp_1, comp_2, token_freq)
+    assoc_f, assoc_b = get_association(comp_1, comp_2, token_freq, unigram_dict)
 
     return {
         'ngram': (comp_1, comp_2), 
@@ -238,7 +246,12 @@ def normalize_scores(bigram_scores, entropy_limits=None, scale_entropy=False):
 
     return normalized_scores
 
-def get_mwu_scores(ngrams, normalize=False, entropy_limits=None, scale_entropy=None, verbose=False, track_progress=False):
+def corpus_to_series(corpus_dict):
+    corpus_dict = {corpus: dict(ngram_dist) for corpus, ngram_dist in corpus_dict.items()} 
+    corpus_series = {corpus: pd.Series({ngram: pd.Series(freqs) for ngram, freqs in corpus_freqs.items()}) for corpus, corpus_freqs in corpus_dict.items()}
+    return corpus_series
+
+def get_mwu_scores(ngrams, parallel=False, ncores=1, normalize=False, entropy_limits=None, scale_entropy=None, verbose=False, track_progress=False):
     """
     Main function to compute MWU scores for the given ngrams. Normalization is optional.
     :param ngrams: Iterable of ngrams in string form. Ngrams components should be separated by 
@@ -255,29 +268,95 @@ def get_mwu_scores(ngrams, normalize=False, entropy_limits=None, scale_entropy=N
     :returns: a dataframe with the MWU scores for each ngram provided. If normalization is true,
         a dictionary with both raw and normalized scores.
     """
-    all_scores = []
-
+    global forward_dict, backward_dict, unigram_dict, corpus_proportions
     if track_progress:
         i = 0
+        # if __name__ == 'mwu_measures.mwu_functions':
+        #     print('hello')
+    # result = Parallel(n_jobs=4)(delayed(get_bigram_scores)(ngram) for ngram in ngrams)
+    # print(result)
+    
+    if parallel:
+        print('parallel')
+        print('dumping objects...')
+        forward_dict = corpus_to_series(processing_corpus.BIGRAM_FW)
+        backward_dict = corpus_to_series(processing_corpus.BIGRAM_BW)
+        unigram_dict = {corpus: pd.Series(frequencies) for corpus, frequencies in processing_corpus.UNIGRAM_FREQUENCIES_PC.items()}
+        corpus_proportions = processing_corpus.CORPUS_PROPORTIONS
 
-    for ngram in ngrams:
-        if verbose:
-            print(ngram)
-        if track_progress:
-            i += 1
-            if i % 1000 == 0:
-                print(f'{i} ngrams processed')
+        dump(forward_dict, './memmap_cache/fwdict')
+        forward_dict = load('./memmap_cache/fwdict', mmap_mode='r')
+        dump(backward_dict, './memmap_cache/bwdict')
+        backward_dict = load('./memmap_cache/bwdict', mmap_mode='r')
+        dump(unigram_dict, './memmap_cache/unigdict')
+        unigram_dict = load('./memmap_cache/unigdict', mmap_mode='r')
+        dump(corpus_proportions, './memmap_cache/cproportions')
+        corpus_proportions = load('./memmap_cache/cproportions', mmap_mode='r')
+        # se demora mil años
+        print('running multiprocess')
+        partial_function = partial(get_bigram_scores, forward_dict=forward_dict, backward_dict=backward_dict,unigram_dict=unigram_dict,corpus_proportions=corpus_proportions)
+        par_bigrams = lambda x: list(map(partial_function, x))
+        # might be optimizable by getting input structures into numpy arrays
+        bigram_chunks = [list(chunks) for chunks in np.array_split(ngrams, 4)]
+        with parallel_config(backend="loky", inner_max_num_threads=1):
+            all_scores = Parallel(n_jobs=4, verbose=40, pre_dispatch='all')(delayed(par_bigrams)(chunk) for chunk in bigram_chunks)
+        all_scores = [ngram for chunk in all_scores for ngram in chunk]
+        all_scores = [score for score in all_scores if score] # gets rid of None
+        print(all_scores)
+        # if __name__ == 'mwu_measures.mwu_functions':
+        #     forward_dict = processing_corpus.BIGRAM_FW
+        #     backward_dict = processing_corpus.BIGRAM_BW
+        #     unigram_dict = processing_corpus.UNIGRAM_TOTAL
+        #     corpus_proportions = processing_corpus.CORPUS_PROPORTIONS
+        #     partial_function = partial(get_bigram_scores, forward_dict=forward_dict, backward_dict=backward_dict,unigram_dict=unigram_dict,corpus_proportions=corpus_proportions)
+        #     par_bigrams = lambda x: list(map(partial_function, x))
+        #     bigram_chunks = [list(chunks) for chunks in np.array_split(ngrams, 4)]
+        #     print(bigram_chunks)
+        #     with Pool(4) as pool:
+        #         # args = zip(ngrams, repeat(forward_dict), repeat(backward_dict), repeat(unigram_dict), repeat(corpus_proportions))
+        #         all_scores = pool.map(par_bigrams, bigram_chunks)
+        #     all_scores = list(all_scores)
+        #     all_scores = [ngram for chunk in all_scores for ngram in chunk]
+        #     all_scores = [score for score in all_scores if score] # gets rid of None
+        #     c = Client()
+        #     webbrowser.open(c.dashboard_link)
+        #     input_ngrams = db.from_sequence(ngrams, npartitions=npartitions)
+        #     all_scores = input_ngrams.map(lambda x: get_bigram_scores(
+        #         x,
+        #         forward_dict,
+        #         backward_dict,
+        #         unigram_dict,
+        #         corpus_proportions,
+        #         verbose
+        #     ))
+        #     c.shutdown()
 
-        comps = ngram.split(' ')
-        #TODO: Trigram info
+    else:
+        forward_dict = processing_corpus.BIGRAM_FW
+        backward_dict = processing_corpus.BIGRAM_BW
+        unigram_dict = processing_corpus.UNIGRAM_TOTAL
+        corpus_proportions = processing_corpus.CORPUS_PROPORTIONS
 
-        bigram_scores = get_bigram_scores(
-            comps[0],
-            comps[1],
-            verbose
-            )
-        if bigram_scores:
-            all_scores.append(bigram_scores)
+        all_scores = []
+        for ngram in ngrams:
+            if verbose:
+                print(ngram)
+            if track_progress:
+                i += 1
+                if i % 1000 == 0:
+                    print(f'{i} ngrams processed')
+
+            #TODO: Trigram info
+            bigram_scores = get_bigram_scores(
+                ngram,
+                forward_dict,
+                backward_dict,
+                unigram_dict,
+                corpus_proportions,
+                verbose
+                )
+            if bigram_scores:
+                all_scores.append(bigram_scores)
 
     results_dataframe = pd.DataFrame(all_scores)
     results_dataframe['ngram'] = results_dataframe['ngram'].apply(' '.join)
