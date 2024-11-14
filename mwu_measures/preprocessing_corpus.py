@@ -11,7 +11,6 @@ from collections import defaultdict
 from itertools import groupby
 from nltk import FreqDist, flatten
 from nltk.util import bigrams as get_bigrams
-# from nltk.util import trigrams as get_trigrams
 
 
 def clean_bnc_line(this_line):

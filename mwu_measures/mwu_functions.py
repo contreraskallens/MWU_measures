@@ -8,8 +8,6 @@ from nltk import FreqDist
 import numpy as np
 import pandas as pd
 from multiprocessing import cpu_count
-# from multiprocessing import Pool, cpu_count
-# from itertools import repeat
 from joblib import Parallel, delayed, parallel_config
 from functools import partial
 from .compute_functions import min_max_norm
@@ -108,8 +106,6 @@ def get_bigram_scores(ngram, forward_dict, backward_dict, unigram_dict, corpus_p
     comps = ngram.split(' ')
     comp_1 = comps[0]
     comp_2 = comps[1]
-    # forward_dict = processing_corpus.BIGRAM_FW
-    # backward_dict = processing_corpus.BIGRAM_BW
     bigram_freq = [(corpus, corpus_dict.get(comp_1, pd.Series(0)).get(comp_2, 0)) for
         corpus, corpus_dict in forward_dict.items()]
     # Token frequency
@@ -258,12 +254,6 @@ def corpus_to_series(corpus_dict):
     corpus_series = {corpus: pd.Series({ngram: pd.Series(freqs) for ngram, freqs in corpus_freqs.items()}) for corpus, corpus_freqs in corpus_dict.items()}
     return corpus_series
 
-# def par_bigrams(ngram_chunk, forward_dict, backward_dict, unigram_dict, corpus_proportions):
-#     results = []
-#     for ngram in ngram_chunk:
-#         results.append(get_bigram_scores(ngram, forward_dict, backward_dict, unigram_dict, corpus_proportions))
-#     return results
-
 def partial_bigrams(ngram_chunk, partial_function):
     return list(map(partial_function, ngram_chunk))
 
@@ -297,10 +287,6 @@ def get_mwu_scores(ngrams, parallel=False, ncores=cpu_count() - 1, normalize=Fal
         print(f'Number of cores in use: {ncores}')
         with parallel_config(backend='loky'):
             all_scores = Parallel(n_jobs=ncores, verbose=40, pre_dispatch='all')(delayed(partial_bigrams)(chunk, partial_function) for chunk in bigram_chunks)
-        # with Pool(ncores) as pool:
-        #     args = zip(ngrams, repeat(forward_dict), repeat(backward_dict), repeat(unigram_dict), repeat(corpus_proportions))
-        #     all_scores = pool.starmap(get_bigram_scores, args, chunksize=len(ngrams) / ncores)
-        #     all_scores = list(all_scores)
             all_scores = [ngram for chunk in all_scores for ngram in chunk]
             all_scores = [score for score in all_scores if score] # gets rid of None
 
