@@ -3,7 +3,7 @@ This module takes a preprocessed corpus and builds the frequency
 data structures needed to extract the MWU variables.
 """
 
-from collections import defaultdict
+from collections import defaultdict, Counter
 import numpy as np
 import pandas as pd
 from nltk import FreqDist, bigrams
@@ -17,6 +17,7 @@ BIGRAM_FW = None
 BIGRAM_BW = None
 
 def get_corpus_props(unigram_freqs_pc):
+### STILL WORKS
     """
     Gets the proportion of the total unigrams that each corpus has. 
     Necessary for obtaining dispersion measure.
@@ -35,6 +36,8 @@ def process_corpus(
     test_corpus=False,
     chunk_size = 10000
     ):
+## TODO RETOOL FOR DOING PROCESSING IN THE OTHER SIDE
+## MAYBE PREPROCESSING COULD JUST BE THE FUNCTIONS TO GO FROM LINE -> (Corpus, Clean_Line)?
     """
     Takes preprocessed corpus and outputs the data structures necessary to compute MWU measures.
     The data obtained are frequencies for unigrams and bigrams, 
@@ -56,23 +59,24 @@ def process_corpus(
     # TODO: consider making it return something and not use global scope variables.
 
     global UNIGRAM_FREQUENCIES_PC
-    global BIGRAM_PER_CORPUS
     global UNIGRAM_TOTAL
-    global BIGRAM_FW
-    global BIGRAM_BW
+    global TRIGRAM_FW
+    global TRIGRAM_BW
+    global TRIGRAM_MERGED_BW
     global CORPUS_PROPORTIONS
 
     # TODO: should make brown the default corpus because it's included in nltk
 
     if verbose:
-        print('Preprocessing the corpus')
+        print('Getting everything ready for score extraction')
     if corpus == 'bnc' and corpus_dir:
-        UNIGRAM_FREQUENCIES_PC, BIGRAM_PER_CORPUS = preprocessing_corpus.preprocess_bnc(
+        UNIGRAM_FREQUENCIES_PC, TRIGRAM_FW, TRIGRAM_BW, TRIGRAM_MERGED_BW = preprocessing_corpus.preprocess_bnc(
             corpus_dir,
             chunk_size=chunk_size,
             verbose=verbose
             )
     if test_corpus:
+        # TODO fix test corpus with new procedure
         corpus_a = 'a d c b e b f g h c b i j k a y z b n o a c c b p q r q a x r z n a'.split()
         corpus_b = 'y i b c p x e j d g n k q r b x x c b d y z f o p q b d j e z b d'.split()
         corpus_c = 'g g i o r j j b c d g j k r e j g f h k h f d h k o a c b r d g k b'.split()
@@ -82,22 +86,12 @@ def process_corpus(
             'B': FreqDist(corpus_b),
             'C': FreqDist(corpus_c)
             }
-        BIGRAM_PER_CORPUS = {
-            'A': FreqDist(bigrams(corpus_a)),
-            'B': FreqDist(bigrams(corpus_b)),
-            'C': FreqDist(bigrams(corpus_c))
-            }
+        # BIGRAM_PER_CORPUS = {
+        #     'A': FreqDist(bigrams(corpus_a)),
+        #     'B': FreqDist(bigrams(corpus_b)),
+        #     'C': FreqDist(bigrams(corpus_c))
+        #     }
     #else: brown corpus
 
-    if verbose:
-        print('Getting everything ready for score extraction')
-
-    UNIGRAM_TOTAL = sum(UNIGRAM_FREQUENCIES_PC.values(), FreqDist())
-
-    BIGRAM_FW = defaultdict(lambda: defaultdict(FreqDist))
-    BIGRAM_BW = defaultdict(lambda: defaultdict(FreqDist))
-    for this_corpus, corpus_dict in BIGRAM_PER_CORPUS.items():
-        for bigram, freq in corpus_dict.items():
-            BIGRAM_FW[this_corpus][bigram[0]][bigram[1]] = freq
-            BIGRAM_BW[this_corpus][bigram[1]][bigram[0]] = freq
+    UNIGRAM_TOTAL = sum(UNIGRAM_FREQUENCIES_PC.values(), Counter())
     CORPUS_PROPORTIONS = get_corpus_props(UNIGRAM_FREQUENCIES_PC)

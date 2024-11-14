@@ -163,3 +163,4 @@ cython_debug/
 bnc_tokenized.txt
 scratch.*
 small_corpus.txt
+small_corpus.txt
