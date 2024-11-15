@@ -6,7 +6,7 @@ data structures needed to extract the MWU variables.
 from collections import defaultdict, Counter
 import numpy as np
 import pandas as pd
-from nltk import FreqDist, bigrams
+from nltk import flatten
 from . import preprocessing_corpus
 
 BIGRAM_PER_CORPUS = None
@@ -64,34 +64,20 @@ def process_corpus(
     global TRIGRAM_BW
     global TRIGRAM_MERGED_BW
     global CORPUS_PROPORTIONS
-
+    global N_TRIGRAMS
     # TODO: should make brown the default corpus because it's included in nltk
 
     if verbose:
         print('Getting everything ready for score extraction')
     if corpus == 'bnc' and corpus_dir:
-        UNIGRAM_FREQUENCIES_PC, TRIGRAM_FW, TRIGRAM_BW, TRIGRAM_MERGED_BW = preprocessing_corpus.preprocess_bnc(
+        UNIGRAM_FREQUENCIES_PC, N_TRIGRAMS, TRIGRAM_FW, TRIGRAM_BW, TRIGRAM_MERGED_BW = preprocessing_corpus.preprocess_bnc(
             corpus_dir,
             chunk_size=chunk_size,
             verbose=verbose
             )
     if test_corpus:
-        # TODO fix test corpus with new procedure
-        corpus_a = 'a d c b e b f g h c b i j k a y z b n o a c c b p q r q a x r z n a'.split()
-        corpus_b = 'y i b c p x e j d g n k q r b x x c b d y z f o p q b d j e z b d'.split()
-        corpus_c = 'g g i o r j j b c d g j k r e j g f h k h f d h k o a c b r d g k b'.split()
-
-        UNIGRAM_FREQUENCIES_PC = {
-            'A': FreqDist(corpus_a),
-            'B': FreqDist(corpus_b),
-            'C': FreqDist(corpus_c)
-            }
-        # BIGRAM_PER_CORPUS = {
-        #     'A': FreqDist(bigrams(corpus_a)),
-        #     'B': FreqDist(bigrams(corpus_b)),
-        #     'C': FreqDist(bigrams(corpus_c))
-        #     }
+        UNIGRAM_FREQUENCIES_PC, N_TRIGRAMS, TRIGRAM_FW, TRIGRAM_BW, TRIGRAM_MERGED_BW = preprocessing_corpus.preprocess_test()
     #else: brown corpus
-
+    
     UNIGRAM_TOTAL = sum(UNIGRAM_FREQUENCIES_PC.values(), Counter())
     CORPUS_PROPORTIONS = get_corpus_props(UNIGRAM_FREQUENCIES_PC)
