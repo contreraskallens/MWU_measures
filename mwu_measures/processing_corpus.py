@@ -16,26 +16,79 @@ UNIGRAM_TOTAL = None
 BIGRAM_FW = None
 BIGRAM_BW = None
 
-def get_corpus_props(unigram_freqs_pc):
-### STILL WORKS
-    """
-    Gets the proportion of the total unigrams that each corpus has. 
-    Necessary for obtaining dispersion measure.
-    """
-    corpus_sizes = {corpus: dist.total() for corpus, dist in unigram_freqs_pc.items()}
-    corpus_total = np.sum(list(corpus_sizes.values()))
-    corpus_props = [(corpus, size / corpus_total) for corpus, size in corpus_sizes.items()]
-    corpus_props = pd.DataFrame(corpus_props, columns=['corpus', 'corpus_prop'])
-    return corpus_props
+# def get_corpus_props(unigram_freqs_pc):
+# ### STILL WORKS
+#     """
+#     Gets the proportion of the total unigrams that each corpus has. 
+#     Necessary for obtaining dispersion measure.
+#     """
+#     corpus_sizes = {corpus: dist.total() for corpus, dist in unigram_freqs_pc.items()}
+#     corpus_total = np.sum(list(corpus_sizes.values()))
+#     corpus_props = [(corpus, size / corpus_total) for corpus, size in corpus_sizes.items()]
+#     corpus_props = pd.DataFrame(corpus_props, columns=['corpus', 'corpus_prop'])
+#     return corpus_props
+
+class Corpus():
+    def __init__(self, corpus_name):
+        self.corpus_name = corpus_name
+        self.trigram_freqs = defaultdict(Counter)
+        self.unigram_freqs = defaultdict(Counter)
+
+    def add_chunk(self, line_chunk):
+        for corpus, unigrams in line_chunk[0].items():
+            self.unigram_freqs[corpus].update(unigrams)
+        for corpus, trigrams in line_chunk[1].items():
+            self.trigram_freqs[corpus].update(trigrams)
+    
+    def query_ngram(self, ngram):
+        ngram = ngram.split()
+        if len(ngram) == 2:
+            counts = defaultdict(Counter)
+            for corpus, corpus_dict in self.trigram_freqs.items():
+                # TODO: ugly :/
+                for trigram, frequency in corpus_dict.items():
+                    if trigram[0] == ngram[0]:
+                        counts[corpus].update({trigram[1]: frequency})
+        if len(ngram) == 3:
+            counts = {corpus: Counter({trigram[2]: frequency for trigram, frequency in corpus_dict.items() if (trigram[0], trigram[1]) == (ngram[0], ngram[1])}) for corpus, corpus_dict in self.trigram_freqs.items()}
+        return counts
+    def query_inverse_ngram(self, ngram):
+        ngram = ngram.split()
+        if len(ngram) == 2:
+            counts = defaultdict(Counter)
+            for corpus, corpus_dict in self.trigram_freqs.items():
+                # TODO: ugly :/
+                for trigram, frequency in corpus_dict.items():
+                    if trigram[1] == ngram[1]:
+                        counts[corpus].update({trigram[0]: frequency})
+        if len(ngram) == 3:
+            counts = {corpus: Counter({(trigram[0], trigram[1]): frequency for trigram, frequency in corpus_dict.items() if trigram[2] == ngram[2]}) for corpus, corpus_dict in self.trigram_freqs.items()}
+        return counts
+
+    def set_corpus_props(self):
+        """
+        Gets the proportion of the total unigrams that each corpus has. 
+        Necessary for obtaining dispersion measure.
+        """
+        corpus_sizes = {corpus: dist.total() for corpus, dist in self.unigram_freqs.items()}
+        corpus_total = np.sum(list(corpus_sizes.values()))
+        corpus_props = [(corpus, size / corpus_total) for corpus, size in corpus_sizes.items()]
+        corpus_props = pd.DataFrame(corpus_props, columns=['corpus', 'corpus_prop'])
+        self.corpus_proportions = corpus_props
+    def set_totals(self):
+        self.unigram_total = sum(self.unigram_freqs.values(), Counter())
+        self.n_trigrams = sum(self.trigram_freqs.values(), Counter()).total()
+    # Clean? 1 appearance per corpus, caput? This would limit the lookup time by a lot
+
 
 
 def process_corpus(
-    corpus='bnc',
-    corpus_dir=None,
-    verbose=False,
-    test_corpus=False,
-    chunk_size = 10000
-    ):
+        corpus_name='bnc',
+        corpus_dir=None,
+        verbose=False,
+        test_corpus=False,
+        chunk_size = 10000
+        ):
 ## TODO RETOOL FOR DOING PROCESSING IN THE OTHER SIDE
 ## MAYBE PREPROCESSING COULD JUST BE THE FUNCTIONS TO GO FROM LINE -> (Corpus, Clean_Line)?
     """
@@ -57,27 +110,36 @@ def process_corpus(
         BIGRAM_FW, BIGRAM_BW, CORPUS_PROPORTIONS
     """
     # TODO: consider making it return something and not use global scope variables.
+    this_corpus = Corpus(corpus_name)
+    if corpus_name == 'bnc' and corpus_dir:
+        with open(corpus_dir, 'r', encoding="utf-8") as corpus_file:
+            i = 0
+            while True:
+                raw_lines = corpus_file.readlines(10000)
+                ngram_dicts = preprocessing_corpus.preprocess_bnc(raw_lines)
+                Corpus.add_chunk(ngram_dicts)
+            
 
-    global UNIGRAM_FREQUENCIES_PC
-    global UNIGRAM_TOTAL
-    global TRIGRAM_FW
-    global TRIGRAM_BW
-    global TRIGRAM_MERGED_BW
-    global CORPUS_PROPORTIONS
-    global N_TRIGRAMS
-    # TODO: should make brown the default corpus because it's included in nltk
+    # global UNIGRAM_FREQUENCIES_PC
+    # global UNIGRAM_TOTAL
+    # global TRIGRAM_FW
+    # global TRIGRAM_BW
+    # global TRIGRAM_MERGED_BW
+    # global CORPUS_PROPORTIONS
+    # global N_TRIGRAMS
+    # # TODO: should make brown the default corpus because it's included in nltk
 
-    if verbose:
-        print('Getting everything ready for score extraction')
-    if corpus == 'bnc' and corpus_dir:
-        UNIGRAM_FREQUENCIES_PC, N_TRIGRAMS, TRIGRAM_FW, TRIGRAM_BW, TRIGRAM_MERGED_BW = preprocessing_corpus.preprocess_bnc(
-            corpus_dir,
-            chunk_size=chunk_size,
-            verbose=verbose
-            )
-    if test_corpus:
-        UNIGRAM_FREQUENCIES_PC, N_TRIGRAMS, TRIGRAM_FW, TRIGRAM_BW, TRIGRAM_MERGED_BW = preprocessing_corpus.preprocess_test()
-    #else: brown corpus
+    # if verbose:
+    #     print('Getting everything ready for score extraction')
+    # if corpus == 'bnc' and corpus_dir:
+    #     UNIGRAM_FREQUENCIES_PC, N_TRIGRAMS, TRIGRAM_FW, TRIGRAM_BW, TRIGRAM_MERGED_BW = preprocessing_corpus.preprocess_bnc(
+    #         corpus_dir,
+    #         chunk_size=chunk_size,
+    #         verbose=verbose
+    #         )
+    # if test_corpus:
+    #     UNIGRAM_FREQUENCIES_PC, N_TRIGRAMS, TRIGRAM_FW, TRIGRAM_BW, TRIGRAM_MERGED_BW = preprocessing_corpus.preprocess_test()
+    # #else: brown corpus
     
-    UNIGRAM_TOTAL = sum(UNIGRAM_FREQUENCIES_PC.values(), Counter())
-    CORPUS_PROPORTIONS = get_corpus_props(UNIGRAM_FREQUENCIES_PC)
+    # UNIGRAM_TOTAL = sum(UNIGRAM_FREQUENCIES_PC.values(), Counter())
+    # CORPUS_PROPORTIONS = get_corpus_props(UNIGRAM_FREQUENCIES_PC)

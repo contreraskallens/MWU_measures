@@ -141,9 +141,8 @@ def get_ngram_scores(ngram, forward_dict, backward_dict, unigram_dict, corpus_pr
 
     ## Need aggregate frequencies for the rest
     if this_type == 'bigram':
-        freqs_ngram_1 = [Counter({unigram_2: freqs.total() for corpus_dict in forward_dict.values() for unigram_2, freqs in corpus_dict.get(comp_1, Counter()).items()})]
-        freqs_ngram_2 = [Counter({unigram_1: freqs.total() for corpus_dict in backward_dict.values() for unigram_1, freqs in corpus_dict.get(comp_2, Counter()).items()})]
-            # corpus_dict.get(comp_1, pd.Series(0)).get for corpus_dict in forward_dict.values()]
+        freqs_ngram_1 = [Counter({unigram_2: freqs.total() for unigram_2, freqs in corpus_dict.get(comp_1, Counter()).items()}) for corpus_dict in forward_dict.values()]
+        freqs_ngram_2 = [Counter({unigram_1: freqs.total() for unigram_1, freqs in corpus_dict.get(comp_2, Counter()).items()}) for corpus_dict in backward_dict.values()]
     if this_type == 'trigram':
         freqs_ngram_1 = [corpus_dict.get(comp_1, Counter()).get(comp_2, Counter()) for corpus_dict in forward_dict.values()]
         freqs_ngram_2 = [corpus_dict.get(comp_3, Counter()) for corpus_dict in backward_merged.values()]
