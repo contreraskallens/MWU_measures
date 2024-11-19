@@ -28,57 +28,70 @@ BIGRAM_BW = None
 #     corpus_props = pd.DataFrame(corpus_props, columns=['corpus', 'corpus_prop'])
 #     return corpus_props
 
-class Corpus():
-    def __init__(self, corpus_name):
-        self.corpus_name = corpus_name
-        self.trigram_freqs = defaultdict(Counter)
-        self.unigram_freqs = defaultdict(Counter)
 
-    def add_chunk(self, line_chunk):
-        for corpus, unigrams in line_chunk[0].items():
-            self.unigram_freqs[corpus].update(unigrams)
-        for corpus, trigrams in line_chunk[1].items():
-            self.trigram_freqs[corpus].update(trigrams)
+
+# class Corpus():
+#     def __init__(self, corpus_name):
+#         self.corpus_name = corpus_name
+#         self.trigram_freqs = defaultdict(Counter)
+#         self.unigram_freqs = defaultdict(Counter)
+#         self.n_trigrams = 0
+#         self.n_unigrams = 0
+#         self.unigram_total = Counter()
+#     def add_chunk(self, line_chunk):
+#         for corpus, unigrams in line_chunk[0].items():
+#             self.unigram_freqs[corpus].update(unigrams)
+#             self.n_unigrams += len(unigrams)
+#             self.unigram_total.update(unigrams)
+#         for corpus, trigrams in line_chunk[1].items():
+#             self.trigram_freqs[corpus].update(trigrams)
+#             self.n_trigrams += len(trigrams)
+#     def query_ngram(self, ngram):
+#         ngram = ngram.split()
+#         if len(ngram) == 2:
+#             counts = defaultdict(Counter)
+#             for corpus, corpus_dict in self.trigram_freqs.items():
+#                 # TODO: ugly :/
+#                 for trigram, frequency in corpus_dict.items():
+#                     if trigram[0] == ngram[0]:
+#                         counts[corpus].update({trigram[1]: frequency})
+#         if len(ngram) == 3:
+#             counts = {corpus: Counter({trigram[2]: frequency for trigram, frequency in corpus_dict.items() if (trigram[0], trigram[1]) == (ngram[0], ngram[1])}) for corpus, corpus_dict in self.trigram_freqs.items()}
+#         return counts
+#     def query_inverse_ngram(self, ngram):
+#         ngram = ngram.split()
+#         if len(ngram) == 2:
+#             counts = defaultdict(Counter)
+#             for corpus, corpus_dict in self.trigram_freqs.items():
+#                 # TODO: ugly :/
+#                 for trigram, frequency in corpus_dict.items():
+#                     if trigram[1] == ngram[1]:
+#                         counts[corpus].update({trigram[0]: frequency})
+#         if len(ngram) == 3:
+#             counts = {corpus: Counter({(trigram[0], trigram[1]): frequency for trigram, frequency in corpus_dict.items() if trigram[2] == ngram[2]}) for corpus, corpus_dict in self.trigram_freqs.items()}
+#         return counts
+
+#     def set_corpus_props(self):
+#         """
+#         Gets the proportion of the total unigrams that each corpus has. 
+#         Necessary for obtaining dispersion measure.
+#         """
+#         print("Computing corpus proportions...")
+#         corpus_sizes = {corpus: dist.total() for corpus, dist in self.unigram_freqs.items()}
+#         corpus_total = np.sum(list(corpus_sizes.values()))
+#         corpus_props = [(corpus, size / corpus_total) for corpus, size in corpus_sizes.items()]
+#         corpus_props = pd.DataFrame(corpus_props, columns=['corpus', 'corpus_prop'])
+#         self.corpus_proportions = corpus_props
+#     def set_totals(self):
+#         print("Computing unigram and trigram totals...")
+#         self.unigram_total = sum(self.unigram_freqs.values(), Counter())
+#         self.n_trigrams = sum(self.trigram_freqs.values(), Counter()).total()
+#     # Clean? 1 appearance per corpus, caput? This would limit the lookup time by a lot
     
-    def query_ngram(self, ngram):
-        ngram = ngram.split()
-        if len(ngram) == 2:
-            counts = defaultdict(Counter)
-            for corpus, corpus_dict in self.trigram_freqs.items():
-                # TODO: ugly :/
-                for trigram, frequency in corpus_dict.items():
-                    if trigram[0] == ngram[0]:
-                        counts[corpus].update({trigram[1]: frequency})
-        if len(ngram) == 3:
-            counts = {corpus: Counter({trigram[2]: frequency for trigram, frequency in corpus_dict.items() if (trigram[0], trigram[1]) == (ngram[0], ngram[1])}) for corpus, corpus_dict in self.trigram_freqs.items()}
-        return counts
-    def query_inverse_ngram(self, ngram):
-        ngram = ngram.split()
-        if len(ngram) == 2:
-            counts = defaultdict(Counter)
-            for corpus, corpus_dict in self.trigram_freqs.items():
-                # TODO: ugly :/
-                for trigram, frequency in corpus_dict.items():
-                    if trigram[1] == ngram[1]:
-                        counts[corpus].update({trigram[0]: frequency})
-        if len(ngram) == 3:
-            counts = {corpus: Counter({(trigram[0], trigram[1]): frequency for trigram, frequency in corpus_dict.items() if trigram[2] == ngram[2]}) for corpus, corpus_dict in self.trigram_freqs.items()}
-        return counts
-
-    def set_corpus_props(self):
-        """
-        Gets the proportion of the total unigrams that each corpus has. 
-        Necessary for obtaining dispersion measure.
-        """
-        corpus_sizes = {corpus: dist.total() for corpus, dist in self.unigram_freqs.items()}
-        corpus_total = np.sum(list(corpus_sizes.values()))
-        corpus_props = [(corpus, size / corpus_total) for corpus, size in corpus_sizes.items()]
-        corpus_props = pd.DataFrame(corpus_props, columns=['corpus', 'corpus_prop'])
-        self.corpus_proportions = corpus_props
-    def set_totals(self):
-        self.unigram_total = sum(self.unigram_freqs.values(), Counter())
-        self.n_trigrams = sum(self.trigram_freqs.values(), Counter()).total()
-    # Clean? 1 appearance per corpus, caput? This would limit the lookup time by a lot
+#     def reduce_frequency(self, ngrams):
+#         occurring_unigrams = flatten([ngram.split() for ngram in ngrams])
+#         reduced_trigrams = {corpus: {trigram: frequency for trigram, frequency in corpus_dict if any(unigram in occurring_unigrams for unigram in trigram)} for corpus, corpus_dict in self.trigram_freqs.items()}
+#         return reduced_trigrams
 
 
 
@@ -115,11 +128,19 @@ def process_corpus(
         with open(corpus_dir, 'r', encoding="utf-8") as corpus_file:
             i = 0
             while True:
-                raw_lines = corpus_file.readlines(10000)
+                raw_lines = corpus_file.readlines(chunk_size)
+                if not raw_lines:
+                    break
                 ngram_dicts = preprocessing_corpus.preprocess_bnc(raw_lines)
-                Corpus.add_chunk(ngram_dicts)
-            
+                this_corpus.add_chunk(ngram_dicts)
+                if verbose:
+                    i += len(raw_lines)
+                    print(f'{i} lines processed')
+                
+    this_corpus.set_corpus_props()
+    # this_corpus.set_totals()
 
+    return this_corpus
     # global UNIGRAM_FREQUENCIES_PC
     # global UNIGRAM_TOTAL
     # global TRIGRAM_FW

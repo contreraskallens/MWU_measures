@@ -92,15 +92,21 @@ def preprocess_bnc(raw_lines):
     org_items = groupby(raw_lines, key=lambda x: re.match(r'(^.)', x).group(1))
     unigrams = {key:[clean_bnc_line(line) for line in group] for key, group in org_items
                 }
-    org_items = groupby(raw_lines, key=lambda x: re.match(r'(^.)', x).group(1))
-    unigrams = {key:[clean_bnc_line(line) for line in group] for key, group in org_items
-                }
+    # org_items = groupby(raw_lines, key=lambda x: re.match(r'(^.)', x).group(1))
+    # unigrams = {key:[clean_bnc_line(line) for line in group] for key, group in org_items
+                # }
     trigrams = {
-    key:[bigram for line in group for bigram in get_trigrams(line) if len(line) > 1]
-    for key, group in unigrams.items()
+        key:[trigram for line in group for trigram in get_trigrams(line) if len(line) > 1]
+        for key, group in unigrams.items()
     }
-    unigrams = {corpus: flatten(units) for corpus, units in unigrams.items()}
+    trigrams = {corpus: Counter(trigrams) for corpus, trigrams in trigrams.items()}
+    trigrams = [(corpus, ngram[0], ngram[1], ngram[2], freq) for corpus, corpus_dict in trigrams.items() for ngram, freq in corpus_dict.items()]
+
+    unigrams = {corpus: Counter(flatten(unigrams)) for corpus, unigrams in unigrams.items()}
+    unigrams = [(corpus, ngram, freq) for corpus, corpus_dict in unigrams.items() for ngram, freq in corpus_dict.items()]
     return unigrams, trigrams
+    # unigrams = {corpus: flatten(units) for corpus, units in unigrams.items()}
+    # return unigrams, trigrams
 
     # for corpus, unigram_list in unigrams.items():
     #     trigrams = {
