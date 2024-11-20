@@ -83,13 +83,62 @@ class Corpus():
 
     def create_totals(self):
         print('First time normalizing. Need to consolidate...')
-        if not self.corpus_conn.execute("SELECT * FROM information_schema.tables WHERE table_name = 'trigram_total'").fetchall():
-            self.corpus_conn.execute("""
-            CREATE TABLE trigram_total AS 
-                SELECT ug_1, ug_2, ug_3, SUM(freq) as FREQ
+        trigram_maxes = self.corpus_conn.execute(
+            """
+            WITH trigram_totals AS (
+                SELECT ug_1, ug_2, ug_3, SUM(freq) as freq
                 FROM trigram_db
                 GROUP BY ug_1, ug_2, ug_3
-            """)
+            ), token_frequency AS (
+                SELECT max(freq) AS max_token_trigram
+                FROM trigram_totals
+            ), type_1 AS (
+                SELECT max(typef_1) as max_type1_trigram
+                FROM (
+                    SELECT ug_3, count( distinct concat(ug_1, ug_2) ) AS typef_1
+                    FROM trigram_totals
+                    GROUP BY ug_3
+                )
+            ), type_2 AS (
+                SELECT max(typef_2) AS max_type2_trigram
+                FROM (
+                    SELECT ug_1, ug_2, count( distinct ug_3 ) AS typef_2
+                    FROM trigram_totals
+                    GROUP BY ug_1, ug_2
+                )
+            )
+        SELECT token_frequency.max_token_trigram, type_1.max_type1_trigram, type_2.max_type2_trigram
+        FROM token_frequency, type_1, type_2
+        """).fetch_df().iloc[0]
+
+        bigram_maxes = self.corpus_conn.execute(
+            """
+            WITH bigram_totals AS (
+                SELECT ug_1, ug_2, SUM(freq) as freq
+                FROM trigram_db
+                GROUP BY ug_1, ug_2
+            ), token_frequency AS (
+                SELECT max(freq) AS max_token_bigram
+                FROM bigram_totals
+            ), type_1 AS (
+                SELECT max(typef_1) AS max_type1_bigram
+                FROM (
+                    SELECT ug_2, count( distinct ug_1 ) AS typef_1
+                    FROM bigram_totals
+                    GROUP BY ug_2
+                )
+            ), type_2 AS (
+            SELECT max(typef_2) AS max_type2_bigram
+            FROM (
+                SELECT ug_1, count( distinct ug_2 ) AS typef_2
+                FROM bigram_totals
+                GROUP BY ug_1
+            )
+        )
+        SELECT token_frequency.max_token_bigram, type_1.max_type1_bigram, type_2.max_type2_bigram
+        FROM token_frequency, type_1, type_2
+        """).fetch_df().iloc[0]
+        self.max_freqs = pd.concat([bigram_maxes, trigram_maxes])
 
     def get_fw_distribution(self, ngram):
         ngrams = ngram.split()

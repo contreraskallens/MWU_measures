@@ -223,10 +223,17 @@ def normalize_scores(bigram_scores, corpus, entropy_limits=None, scale_entropy=F
     :returns: A copy of the input DataFrame with the values normalized.
     """
     # Token: min_max
-
+    # divide between bigrams and trigrams, then concatenate again
     corpus.create_totals()
-    max_token = corpus.corpus_conn.execute("SELECT max(FREQ) FROM trigram_total").fetchone()[0]
-    max_token = np.log(max_token)
+    max_token_bigram = np.log(corpus.max_freqs.max_token_bigram)
+    max_token_trigram = np.log(corpus.max_freqs.max_token_trigram)
+
+    max_type1_bigram = np.log(corpus.max_freqs.max_type1_bigram)
+    max_type1_trigram = np.log(corpus.max_freqs.max_type1_trigram)
+
+    max_type2_bigram = np.log(corpus.max_freqs.max_type2_bigram)
+    max_type2_trigram = np.log(corpus.max_freqs.max_type2_trigram)
+
     min_token = np.log(1)
 
     normalized_scores = bigram_scores.copy()
