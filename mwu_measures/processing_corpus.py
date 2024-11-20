@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from nltk import flatten
 from . import preprocessing_corpus
+import duckdb
 
 BIGRAM_PER_CORPUS = None
 CORPUS_PROPORTIONS = None
@@ -28,6 +29,98 @@ BIGRAM_BW = None
 #     corpus_props = pd.DataFrame(corpus_props, columns=['corpus', 'corpus_prop'])
 #     return corpus_props
 
+
+
+class Corpus():
+    def __init__(self, corpus_name):
+        self.corpus_conn = duckdb.connect(":memory:")
+        self.corpus_conn.execute("""
+        CREATE TABLE trigram_db (
+            corpus TEXT,
+            ug_1 TEXT,
+            ug_2 TEXT,
+            ug_3 TEXT,
+            freq INTEGER
+            )
+            """)
+        self.corpus_conn.execute("""
+        CREATE TABLE unigram_db (
+            corpus TEXT,
+            ug TEXT,
+            freq INTEGER
+            )
+            """)
+    def add_chunk(self, ngram_lists):
+        chunk_unigrams, chunk_trigrams = ngram_lists
+        chunk_unigrams = pd.DataFrame(chunk_unigrams, columns=['corpus', 'ug', 'freq'])
+        chunk_trigrams = pd.DataFrame(chunk_trigrams, columns=['corpus', 'ug_1', 'ug_2', 'ug_3', 'freq'])
+        self.corpus_conn.register('chunk_unigrams', chunk_unigrams)
+        self.corpus_conn.execute("INSERT INTO unigram_db SELECT * FROM chunk_unigrams")
+        self.corpus_conn.register('chunk_trigrams', chunk_trigrams)
+        self.corpus_conn.execute("INSERT INTO trigram_db SELECT * FROM chunk_trigrams")
+
+    def consolidate_corpus(self):
+        self.corpus_conn.execute("""
+        CREATE OR REPLACE TABLE trigram_db AS
+        SELECT corpus, ug_1, ug_2, ug_3, SUM(freq) AS freq
+        FROM trigram_db
+        GROUP BY corpus, ug_1, ug_2, ug_3
+        """)
+        self.corpus_conn.execute("""
+        CREATE OR REPLACE TABLE unigram_db AS
+        SELECT corpus, ug, SUM(freq) AS freq
+        FROM unigram_db
+        GROUP BY corpus, ug
+        """)
+
+        # total unigrams
+        ug_freqs = self.corpus_conn.execute("SELECT ug, SUM(freq) AS freq FROM unigram_db GROUP BY ug").fetch_df()
+        self.total_unigrams = Counter(dict(zip(ug_freqs.ug, ug_freqs.freq)))
+        # corpus proportions
+        self.corpus_proportions = self.corpus_conn.execute("SELECT corpus, SUM(freq) / (SELECT SUM(freq) FROM unigram_db) AS freq FROM unigram_db GROUP BY corpus").fetch_df()
+        # n_trigrams
+        self.n_trigrams = self.corpus_conn.execute("SELECT SUM(freq) FROM trigram_db").fetchone()[0]
+
+    def create_totals(self):
+        print('First time normalizing. Need to consolidate...')
+        if not self.corpus_conn.execute("SELECT * FROM information_schema.tables WHERE table_name = 'trigram_total'").fetchall():
+            self.corpus_conn.execute("""
+            CREATE TABLE trigram_total AS 
+                SELECT ug_1, ug_2, ug_3, SUM(freq) as FREQ
+                FROM trigram_db
+                GROUP BY ug_1, ug_2, ug_3
+            """)
+
+    def get_fw_distribution(self, ngram):
+        ngrams = ngram.split()
+        if len(ngrams) == 2:
+            distribution = self.corpus_conn.execute("SELECT corpus, ug_1, ug_2, SUM(freq) AS freq FROM trigram_db WHERE ug_1 = ? GROUP BY corpus, ug_1, ug_2", [ngrams[0]]).fetch_df()
+            # TODO: messy, just so I don't have to rewrite calc functions
+            distribution = distribution.groupby(by='corpus')[['ug_2', 'freq']].apply(lambda x: Counter(dict(zip(x['ug_2'], x['freq']))))
+            distribution = distribution.to_dict()
+            # distribution = Counter(dict(zip(distribution.ug_2, distribution.freq)))
+        if len(ngrams) == 3:
+            distribution = self.corpus_conn.execute("SELECT * FROM trigram_db WHERE ug_1 = ? AND ug_2 = ?", [ngrams[0], ngrams[1]]).fetch_df()
+            distribution = distribution.groupby(by='corpus')[['ug_3', 'freq']].apply(lambda x: Counter(dict(zip(x['ug_3'], x['freq']))))
+            distribution = distribution.to_dict()
+            # distribution = Counter(dict(zip(distribution.ug_3, distribution.freq)))
+        return distribution
+
+    def get_bw_distribution(self, ngram):
+        ngrams = ngram.split()
+        if len(ngrams) == 2:
+            distribution = self.corpus_conn.execute("SELECT corpus, ug_1, ug_2, SUM(freq) AS freq FROM trigram_db WHERE ug_2 = ? GROUP BY corpus, ug_1, ug_2", [ngrams[1]]).fetch_df()
+            distribution = distribution.groupby(by='corpus')[['ug_1', 'freq']].apply(lambda x: Counter(dict(zip(x['ug_1'], x['freq']))))
+            distribution = distribution.to_dict()
+        if len(ngrams) == 3:
+            distribution = self.corpus_conn.execute("SELECT * FROM trigram_db WHERE ug_3 = ?", [ngrams[2]]).fetch_df()
+            distribution = distribution.groupby(by='corpus')[['ug_1', 'ug_2', 'freq']].apply(lambda x: Counter(dict(zip(zip(x['ug_1'], x['ug_2']), x['freq']))))
+            distribution = distribution.to_dict()
+        return distribution
+
+    def get_unigram(self, unigram):
+        unigram_info = self.corpus_conn.execute("SELECT corpus, ug, freq  FROM unigram_db WHERE ug = ?", [unigram]).fetch_df()
+        return unigram_info
 
 
 # class Corpus():
@@ -122,7 +215,7 @@ def process_corpus(
         UNIGRAM_FREQUENCIES_PC, BIGRAM_PER_CORPUS, UNIGRAM_TOTAL,
         BIGRAM_FW, BIGRAM_BW, CORPUS_PROPORTIONS
     """
-    # TODO: consider making it return something and not use global scope variables.
+    this_corpus = Corpus('bnc')
     this_corpus = Corpus(corpus_name)
     if corpus_name == 'bnc' and corpus_dir:
         with open(corpus_dir, 'r', encoding="utf-8") as corpus_file:
@@ -137,9 +230,7 @@ def process_corpus(
                     i += len(raw_lines)
                     print(f'{i} lines processed')
                 
-    this_corpus.set_corpus_props()
-    # this_corpus.set_totals()
-
+    this_corpus.consolidate_corpus()
     return this_corpus
     # global UNIGRAM_FREQUENCIES_PC
     # global UNIGRAM_TOTAL

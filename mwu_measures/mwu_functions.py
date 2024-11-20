@@ -29,13 +29,8 @@ def get_dispersion(ngram_freq, token_freq, corpus_proportions):
         used to transform frequencies into proportions.
     :returns: Dispersion measure as a scalar.
     """
-    if not isinstance(corpus_proportions, pd.DataFrame):
-        corpus_proportions = pd.DataFrame.from_dict(
-            corpus_proportions, orient='index'
-        ).reset_index().rename(
-            columns={'index': 'corpus', 0: 'corpus_prop'}
-            )
-    ngram_props = [(corpus, freq / token_freq) for corpus, freq in ngram_freq]
+    
+    ngram_props = [(corpus, freq / token_freq) for corpus, freq in ngram_freq.items()]
     ngram_props = pd.DataFrame(ngram_props, columns=['corpus', 'ngram_prop'])
     ngram_props = pd.merge(
         corpus_proportions,
@@ -44,10 +39,10 @@ def get_dispersion(ngram_freq, token_freq, corpus_proportions):
         how='left'
         ).fillna(0)
     kld_props = compute_functions.get_kld(ngram_props['ngram_prop'].values,
-        ngram_props['corpus_prop'].values)
+        ngram_props['freq'].values)
     return kld_props
 
-def get_association(part_1, part_2, token_freq, unigram_frequencies, bigram_frequencies=None, n_trigrams=None):
+def get_association(part_1, part_2, token_freq, unigram_frequencies, fw_dist, n_trigrams=None):
     """
     Obtains the association between the components of a bigram as
     the KLD between joint occurrence and overall occurrence.
@@ -63,22 +58,21 @@ def get_association(part_1, part_2, token_freq, unigram_frequencies, bigram_freq
     """
     # unigram_frequencies = processing_corpus.UNIGRAM_TOTAL
     # joint probability is conditioned on the unigram frequencies
-    if isinstance(part_1, tuple):
-        comp_1_freq = [freqs.get(part_1[0], Counter()).get(part_1[1], Counter()).total() for corpus, freqs in bigram_frequencies.items()] 
-        comp_1_freq = sum(comp_1_freq)
-    else:
-        comp_1_freq = unigram_frequencies.get(part_1, 0)
-    comp_2_freq = unigram_frequencies.get(part_2, 0) # Comp2 is a unigram in bigrams and trigrams
-    prob_1_2 = token_freq / comp_1_freq
-    prob_2_1 = token_freq / comp_2_freq
+
+    comp_1_freq = fw_dist.total()
+    comp_2_freq = unigram_frequencies.get(part_2, 0) # Part 2 is a unigram in bigrams and trigrams
+    prob_2_1 = token_freq / comp_1_freq
+    prob_1_2 = token_freq / comp_2_freq
+
     if isinstance(part_1, tuple):
         prob_1 = comp_1_freq / n_trigrams # Because the frequency is calculated by taking summing over trigram frequencies, the probability should be calculated with those too.
-    else:
-        prob_1 = comp_1_freq / sum(unigram_frequencies.values()) 
-    prob_2 = comp_2_freq / sum(unigram_frequencies.values())
-    assoc_f = compute_functions.get_kld(np.array([prob_1_2, 1 - prob_1_2]),
+    else: 
+        prob_1 = comp_1_freq / unigram_frequencies.total()
+    prob_2 = comp_2_freq / unigram_frequencies.total()
+
+    assoc_f = compute_functions.get_kld(np.array([prob_2_1, 1 - prob_2_1]),
         np.array([prob_2, 1 - prob_2]))
-    assoc_b = compute_functions.get_kld(np.array([prob_2_1, 1 - prob_2_1]),
+    assoc_b = compute_functions.get_kld(np.array([prob_1_2, 1 - prob_1_2]),
         np.array([prob_1, 1 - prob_1]))
     return assoc_f, assoc_b
 
@@ -101,9 +95,8 @@ def get_entropy_dif(ngram_1_freqs, ngram_2):
     entropy_cf = compute_functions.get_entropy(freqs_cf)
     h_diff = entropy_cf - entropy
     return h_diff
-
-
-def get_ngram_scores(ngram, forward_dict, backward_dict, unigram_dict, corpus_proportions, backward_merged=None, n_trigrams=None, verbose=False):
+    
+def get_ngram_scores(ngram, corpus, verbose=False):
     """
     Function for computing the MWU measures for a target ngram. 
     :param ngram: A string with the ngram to be analyzed.
@@ -124,49 +117,51 @@ def get_ngram_scores(ngram, forward_dict, backward_dict, unigram_dict, corpus_pr
     else:
         print('Error! ngram length not supported')
 
-    if this_type == 'bigram':
-        ngram_freq = [(corpus, corpus_dict.get(comp_1, Counter()).get(comp_2, Counter()).total()) for
-        corpus, corpus_dict in forward_dict.items()]
-    elif this_type == 'trigram':
-        ngram_freq = [(corpus, corpus_dict.get(comp_1, Counter()).get(comp_2, Counter()).get(comp_3, 0)) for
-        corpus, corpus_dict in forward_dict.items()]
+    fw_dist = corpus.get_fw_distribution(ngram)
+    bw_dist = corpus.get_bw_distribution(ngram)
 
+    if this_type == 'bigram':    
+        ngram_freq = {this_corpus: freq.get(comp_2, 0) for this_corpus, freq in fw_dist.items()}
+    if this_type == 'trigram':
+        ngram_freq = {this_corpus: freq.get(comp_3, 0) for this_corpus, freq in fw_dist.items()}
+    
     # Token frequency
-    token_freq = sum(freqs[1] for freqs in ngram_freq)
+    token_freq = sum(ngram_freq.values())
     if token_freq == 0:
         print(f'<<{" ".join([comp_1, comp_2, comp_3])}>> is not in the corpus')
         return None
     # Dispersion
+    corpus_proportions = corpus.corpus_proportions
     dispersion = get_dispersion(ngram_freq, token_freq, corpus_proportions)
-
-    ## Need aggregate frequencies for the rest
-    if this_type == 'bigram':
-        freqs_ngram_1 = [Counter({unigram_2: freqs.total() for unigram_2, freqs in corpus_dict.get(comp_1, Counter()).items()}) for corpus_dict in forward_dict.values()]
-        freqs_ngram_2 = [Counter({unigram_1: freqs.total() for unigram_1, freqs in corpus_dict.get(comp_2, Counter()).items()}) for corpus_dict in backward_dict.values()]
-    if this_type == 'trigram':
-        freqs_ngram_1 = [corpus_dict.get(comp_1, Counter()).get(comp_2, Counter()) for corpus_dict in forward_dict.values()]
-        freqs_ngram_2 = [corpus_dict.get(comp_3, Counter()) for corpus_dict in backward_merged.values()]
-    freqs_ngram_1 = sum(freqs_ngram_1, Counter())
-    freqs_ngram_2 = sum(freqs_ngram_2, Counter())
+    
+    # Total frequencies
+    fw_dist = sum(fw_dist.values(), Counter())
+    bw_dist = sum(bw_dist.values(), Counter())
 
     # Type frequencies
-    typef_1 = len(freqs_ngram_2)
-    typef_2 = len(freqs_ngram_1)
+    typef_1 = len(bw_dist)
+    typef_2 = len(fw_dist)
 
     # Entropy
     if this_type == 'bigram':
-        slot1_diff = get_entropy_dif(freqs_ngram_2, comp_1)
-        slot2_diff = get_entropy_dif(freqs_ngram_1, comp_2)
+        slot1_diff = get_entropy_dif(bw_dist, comp_1)
+        slot2_diff = get_entropy_dif(fw_dist, comp_2)
     elif this_type == 'trigram':
-        slot1_diff = get_entropy_dif(freqs_ngram_2, (comp_2, comp_1))
-        slot2_diff = get_entropy_dif(freqs_ngram_1, comp_3)
+        slot1_diff = get_entropy_dif(bw_dist, (comp_1, comp_2))
+        slot2_diff = get_entropy_dif(fw_dist, comp_3)
 
-
+    unigram_dict = corpus.total_unigrams
+    n_trigrams = corpus.n_trigrams
     # Association
     if this_type == 'bigram':
-        assoc_f, assoc_b = get_association(comp_1, comp_2, token_freq, unigram_dict) 
+        part_1 = comp_1
+        part_2 = comp_2
     elif this_type == 'trigram':
-        assoc_f, assoc_b = get_association((comp_1, comp_2), comp_3, token_freq, unigram_dict, forward_dict, n_trigrams) 
+        part_1 = (comp_1, comp_2)
+        part_2 = comp_3
+    assoc_f, assoc_b = get_association(part_1, part_2, token_freq, unigram_dict, fw_dist, n_trigrams) 
+
+
     if this_type == 'bigram':
         return {
             'ngram': (comp_1, comp_2), 
@@ -196,25 +191,24 @@ def get_ngram_scores(ngram, forward_dict, backward_dict, unigram_dict, corpus_pr
             'assoc_b': assoc_b
             }
 
+# def consolidate_scores():
+#     """
+#     Function to consolidate the per-corpus bigram frequencies
+#     into a single distribution. Used for normalization.
+#     """
+#     global CONSOLIDATED_FW, CONSOLIDATED_BW
+#     CONSOLIDATED_FW = defaultdict(FreqDist)
+#     for _, corpus_dict in processing_corpus.BIGRAM_FW.items():
+#         for bigram, freq in corpus_dict.items():
+#             CONSOLIDATED_FW[bigram].update(freq)
 
-def consolidate_scores():
-    """
-    Function to consolidate the per-corpus bigram frequencies
-    into a single distribution. Used for normalization.
-    """
-    global CONSOLIDATED_FW, CONSOLIDATED_BW
-    CONSOLIDATED_FW = defaultdict(FreqDist)
-    for _, corpus_dict in processing_corpus.BIGRAM_FW.items():
-        for bigram, freq in corpus_dict.items():
-            CONSOLIDATED_FW[bigram].update(freq)
-
-    CONSOLIDATED_BW = defaultdict(FreqDist)
-    for _, corpus_dict in processing_corpus.BIGRAM_BW.items():
-        for bigram, freq in corpus_dict.items():
-            CONSOLIDATED_BW[bigram].update(freq)
+#     CONSOLIDATED_BW = defaultdict(FreqDist)
+#     for _, corpus_dict in processing_corpus.BIGRAM_BW.items():
+#         for bigram, freq in corpus_dict.items():
+#             CONSOLIDATED_BW[bigram].update(freq)
 
 
-def normalize_scores(bigram_scores, entropy_limits=None, scale_entropy=False):
+def normalize_scores(bigram_scores, corpus, entropy_limits=None, scale_entropy=False):
     """
     Normalizes the scores obtained by get_bigram_scores using the transformations
     suggested by S. Gries. 
@@ -229,12 +223,10 @@ def normalize_scores(bigram_scores, entropy_limits=None, scale_entropy=False):
     :returns: A copy of the input DataFrame with the values normalized.
     """
     # Token: min_max
-    global CONSOLIDATED_FW, CONSOLIDATED_BW
 
-    if not CONSOLIDATED_FW and not CONSOLIDATED_BW:
-        print('First time normalizing. Need to consolidate...')
-        consolidate_scores()
-    max_token = np.log(max([freq[freq.max()] for freq in CONSOLIDATED_FW.values() if freq.B() > 0]))
+    corpus.create_totals()
+    max_token = corpus.corpus_conn.execute("SELECT max(FREQ) FROM trigram_total").fetchone()[0]
+    max_token = np.log(max_token)
     min_token = np.log(1)
 
     normalized_scores = bigram_scores.copy()
