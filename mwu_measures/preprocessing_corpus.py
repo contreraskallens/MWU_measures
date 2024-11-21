@@ -33,30 +33,35 @@ def make_bigram_dict():
     return this_dict
 
 def preprocess_test():
-    unigram_freqs = defaultdict(Counter)
-    trigram_counts = defaultdict(Counter)
-    trigram_fw =  defaultdict(lambda: defaultdict(make_bigram_dict))
-    trigram_bw = defaultdict(lambda: defaultdict(make_bigram_dict))
-    n_trigrams = 0
+    # unigram_freqs = defaultdict(Counter)
+    # trigram_counts = defaultdict(Counter)
+    # trigram_fw =  defaultdict(lambda: defaultdict(make_bigram_dict))
+    # trigram_bw = defaultdict(lambda: defaultdict(make_bigram_dict))
+    # n_trigrams = 0
     with open('mwu_measures/corpora/test_corpus.txt', 'r', encoding="utf-8") as corpus_file:
         raw_lines = corpus_file.read().splitlines()
+    # unigrams = {key:[clean_bnc_line(line) for line in group] for key, group in org_items
+    #             }
+    # trigrams = {
+    #     key:[trigram for line in group for trigram in get_trigrams(line) if len(line) > 1]
+    #     for key, group in unigrams.items()
+    # }
+    # trigrams = {corpus: Counter(trigrams) for corpus, trigrams in trigrams.items()}
+    # trigrams = [(corpus, ngram[0], ngram[1], ngram[2], freq) for corpus, corpus_dict in trigrams.items() for ngram, freq in corpus_dict.items()]
+
+    # unigrams = {corpus: Counter(flatten(unigrams)) for corpus, unigrams in unigrams.items()}
+    # unigrams = [(corpus, ngram, freq) for corpus, corpus_dict in unigrams.items() for ngram, freq in corpus_dict.items()]
+    # return unigrams, trigrams
+
     split_lines = [line.split() for line in raw_lines]
-    unigrams = dict(zip(['A', 'B', 'C'], split_lines))
-    for corpus, unigram_list in unigrams.items():
-        unigram_freqs[corpus].update(unigram_list)
-    trigrams = {
-            key:[trigram for trigram in get_trigrams(line) if len(line) > 1]
-            for key, line in unigrams.items()
-            }
-    trigram_counts = {corpus: Counter(trigram_ocs) for corpus, trigram_ocs in trigrams.items()} #dunno if this step is necessary
-    for corpus, counts in trigram_counts.items():
-        for trigram, freq in counts.items():
-            trigram_fw[corpus][trigram[0]][trigram[1]].update([trigram[2]])
-            trigram_bw[corpus][trigram[2]][trigram[1]].update([trigram[0]])
-    trigram_merged_bw = {corpus: {this_c3: Counter({(this_c2, this_c1): freq for this_c2, c1_freqs in c2_freqs.items() for this_c1, freq in c1_freqs.items()})  for this_c3, c2_freqs in c3_freqs.items()} for corpus, c3_freqs in trigram_bw.items()}
-    n_trigrams = [sum(bigram_freqs.values()) for corpus_freqs in trigram_merged_bw.values() for bigram_freqs in corpus_freqs.values()]
-    n_trigrams = sum(n_trigrams)
-    return (unigram_freqs, n_trigrams, trigram_fw, trigram_bw, trigram_merged_bw)
+    # unigrams = [unigram for unigram in ]
+    # unigrams = zip(['A', 'B', 'C'], split_lines)
+    trigrams = [Counter(get_trigrams(line)) for line in split_lines]
+    corpora = ['A', 'B', 'C']
+    trigrams = [(corpus, trigram[0], trigram[1], trigram[2], freq) for corpus, corpus_dict in zip(corpora, trigrams) for trigram, freq in corpus_dict.items()]
+    unigrams = [Counter(unigrams) for unigrams in split_lines]
+    unigrams = [(corpus, unigram, freq) for corpus, corpus_dict in zip(corpora, unigrams) for unigram, freq in corpus_dict.items()]
+    return unigrams, trigrams
 
 
 # def preprocess_bnc(bnc_dir, chunk_size = 10000, verbose = False):
@@ -75,26 +80,9 @@ def preprocess_bnc(raw_lines):
         of each element within that corpus.
     """
     # #for BNC, you want to provide the bnc_tokenized.txt file
-    # if verbose:
-    #     print('Reading and cleaning corpus...')
-    # Corpus, uni_1, uni_2, uni_3, frequency
-    # unigram_freqs = defaultdict(Counter)
-    # trigram_counts = defaultdict(Counter)
-    # trigram_fw =  defaultdict(lambda: defaultdict(make_bigram_dict))
-    # trigram_bw = defaultdict(lambda: defaultdict(make_bigram_dict))
-    # n_trigrams = 0
-    # with open(bnc_dir, 'r', encoding="utf-8") as corpus_file:
-    #     i = 0
-    #     while True:
-    #         # raw_lines = corpus_file.readlines(10000)
-    #         # if not raw_lines:
-    #         #     break
     org_items = groupby(raw_lines, key=lambda x: re.match(r'(^.)', x).group(1))
     unigrams = {key:[clean_bnc_line(line) for line in group] for key, group in org_items
                 }
-    # org_items = groupby(raw_lines, key=lambda x: re.match(r'(^.)', x).group(1))
-    # unigrams = {key:[clean_bnc_line(line) for line in group] for key, group in org_items
-                # }
     trigrams = {
         key:[trigram for line in group for trigram in get_trigrams(line) if len(line) > 1]
         for key, group in unigrams.items()
@@ -105,31 +93,3 @@ def preprocess_bnc(raw_lines):
     unigrams = {corpus: Counter(flatten(unigrams)) for corpus, unigrams in unigrams.items()}
     unigrams = [(corpus, ngram, freq) for corpus, corpus_dict in unigrams.items() for ngram, freq in corpus_dict.items()]
     return unigrams, trigrams
-    # unigrams = {corpus: flatten(units) for corpus, units in unigrams.items()}
-    # return unigrams, trigrams
-
-    # for corpus, unigram_list in unigrams.items():
-    #     trigrams = {
-    #     key:[bigram for line in group for bigram in get_trigrams(line) if len(line) > 1]
-    #     for key, group in unigrams.items()
-    #     }
-    #     # chunk_unigrams = flatten(unigram_list)
-    #     # unigram_freqs[corpus].update(chunk_unigrams)
-    #     trigrams = {
-    #         key:[bigram for line in group for bigram in get_trigrams(line) if len(line) > 1]
-    #         for key, group in unigrams.items()
-    #         }
-    # # trigram_counts = {corpus: Counter(trigram_ocs) for corpus, trigram_ocs in trigrams.items()} #dunno if this step is necessary
-    #         # for corpus, counts in trigram_counts.items():
-    #             # for trigram, freq in counts.items():
-    #                 # trigram_fw[corpus][trigram[0]][trigram[1]].update([trigram[2]])
-    #                 # trigram_bw[corpus][trigram[2]][trigram[1]].update([trigram[0]])
-    #         # i += 1
-    #         # if verbose:
-    #             # i += len(raw_lines)
-    #             # print(f'{i} lines processed')
-    # # print('Merging....')        
-    # # trigram_merged_bw = {corpus: {this_c3: Counter({(this_c2, this_c1): freq for this_c2, c1_freqs in c2_freqs.items() for this_c1, freq in c1_freqs.items()})  for this_c3, c2_freqs in c3_freqs.items()} for corpus, c3_freqs in trigram_bw.items()}
-    # # n_trigrams = [sum(bigram_freqs.values()) for corpus_freqs in trigram_merged_bw.values() for bigram_freqs in corpus_freqs.values()]
-    # # n_trigrams = sum(n_trigrams)
-    # # return (unigram_freqs, n_trigrams, trigram_fw, trigram_bw, trigram_merged_bw)

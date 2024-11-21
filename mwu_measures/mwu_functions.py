@@ -18,6 +18,20 @@ from . import processing_corpus
 CONSOLIDATED_FW = None
 CONSOLIDATED_BW = None
 
+
+class Feeder():
+    def __init__(self, corpus):
+        self.corpus_conn = corpus.corpus_conn
+        self.unigram_dict = corpus.total_unigrams
+        self.n_trigrams = corpus.n_trigrams
+        self.corpus_proportions = corpus.corpus_proportions
+    
+    def allocate_ngrams(self, ngram_list):
+        bigrams = [ngram for ngram in ngram_list if len(ngram.split()) == 2]
+        trigrams = [ngram for ngram in ngram_list if len(ngram.split()) == 3]
+
+        
+
 def get_dispersion(ngram_freq, token_freq, corpus_proportions):
     """
     Computes the "Dispersion" variable for an ngram as the
@@ -131,7 +145,6 @@ def get_ngram_scores(ngram, corpus, verbose=False):
         print(f'<<{" ".join([comp_1, comp_2, comp_3])}>> is not in the corpus')
         return None
     # Dispersion
-    corpus_proportions = corpus.corpus_proportions
     dispersion = get_dispersion(ngram_freq, token_freq, corpus_proportions)
     
     # Total frequencies
@@ -150,8 +163,6 @@ def get_ngram_scores(ngram, corpus, verbose=False):
         slot1_diff = get_entropy_dif(bw_dist, (comp_1, comp_2))
         slot2_diff = get_entropy_dif(fw_dist, comp_3)
 
-    unigram_dict = corpus.total_unigrams
-    n_trigrams = corpus.n_trigrams
     # Association
     if this_type == 'bigram':
         part_1 = comp_1
@@ -174,7 +185,8 @@ def get_ngram_scores(ngram, corpus, verbose=False):
             'entropy_1': slot1_diff,
             'entropy_2': slot2_diff,
             'assoc_f': assoc_f,
-            'assoc_b': assoc_b
+            'assoc_b': assoc_b,
+            'length': 2
             }
     elif this_type == 'trigram':
         return {
@@ -188,7 +200,8 @@ def get_ngram_scores(ngram, corpus, verbose=False):
             'entropy_1': slot1_diff,
             'entropy_2': slot2_diff,
             'assoc_f': assoc_f,
-            'assoc_b': assoc_b
+            'assoc_b': assoc_b,
+            'length': 3
             }
 
 # def consolidate_scores():
@@ -208,7 +221,7 @@ def get_ngram_scores(ngram, corpus, verbose=False):
 #             CONSOLIDATED_BW[bigram].update(freq)
 
 
-def normalize_scores(bigram_scores, corpus, entropy_limits=None, scale_entropy=False):
+def normalize_scores(ngram_scores, corpus, entropy_limits=None, scale_entropy=False):
     """
     Normalizes the scores obtained by get_bigram_scores using the transformations
     suggested by S. Gries. 
@@ -222,8 +235,8 @@ def normalize_scores(bigram_scores, corpus, entropy_limits=None, scale_entropy=F
         function to expand the range of values.
     :returns: A copy of the input DataFrame with the values normalized.
     """
-    # Token: min_max
-    # divide between bigrams and trigrams, then concatenate again
+
+
     corpus.create_totals()
     max_token_bigram = np.log(corpus.max_freqs.max_token_bigram)
     max_token_trigram = np.log(corpus.max_freqs.max_token_trigram)
@@ -235,49 +248,84 @@ def normalize_scores(bigram_scores, corpus, entropy_limits=None, scale_entropy=F
     max_type2_trigram = np.log(corpus.max_freqs.max_type2_trigram)
 
     min_token = np.log(1)
+    min_type = np.log(1)
+    # divide between bigrams and trigrams, then concatenate again. Probably a more generalizable way out there but who care
+    if len(set(ngram_scores.length)) > 1:
+        bigrams_norm = ngram_scores.groupby(ngram_scores.length).get_group(2).copy()
+        trigrams_norm = ngram_scores.groupby(ngram_scores.length).get_group(3).copy() 
 
-    normalized_scores = bigram_scores.copy()
-    normalized_scores['token_freq'] = min_max_norm(
-        np.log(bigram_scores['token_freq']),
-        min_token,
-        max_token
+    # Token: min_max
+
+        bigrams_norm['token_freq'] = min_max_norm(
+            np.log(bigrams_norm['token_freq']),
+            min_token,
+            max_token_bigram
         )
+
+        trigrams_norm['token_freq'] = min_max_norm(
+            np.log(trigrams_norm['token_freq']),
+            min_token,
+            max_token_trigram
+            )
+        
+        # Types: min_max and substract from 1
+        bigrams_norm['type_1'] = 1 - min_max_norm(
+            np.log(bigrams_norm['type_1']),
+            min_type,
+            max_type1_bigram
+        )
+        bigrams_norm['type_2'] = 1 - min_max_norm(
+            np.log(bigrams_norm['type_2']),
+            min_type,
+            max_type2_bigram
+        )
+
+        trigrams_norm['type_1'] = 1 - min_max_norm(
+            np.log(trigrams_norm['type_1']),
+            min_type,
+            max_type1_trigram
+            )
+        trigrams_norm['type_2'] = 1 - min_max_norm(
+            np.log(trigrams_norm['type_2']),
+            min_type,
+            max_type2_trigram)
+
+        normalized_scores = pd.concat([bigrams_norm, trigrams_norm], ignore_index=True)
+    else:
+        normalized_scores = ngram_scores.copy()
+        normalized_scores['token_freq'] = min_max_norm(
+            np.log(normalized_scores['token_freq']),
+            min_token,
+            max_token_bigram
+        )
+        normalized_scores['type_1'] = 1 - min_max_norm(
+            np.log(normalized_scores['type_1']),
+            min_type,
+            max_type1_bigram
+        )
+        normalized_scores['type_2'] = 1 - min_max_norm(
+            np.log(normalized_scores['type_2']),
+            min_type,
+            max_type2_bigram
+        )
+
 
     # Dispersion: substract from 1
     normalized_scores['dispersion'] = 1 - normalized_scores['dispersion']
 
-    # Types: min_max and substract from 1
-    typef_1_all = [freq.B() for freq in CONSOLIDATED_BW.values()]
-    typef_1_max = np.log(max(typef_1_all))
-    typef_1_min = np.log(1)
-
-    typef_2_all = [freq.B() for freq in CONSOLIDATED_FW.values()]
-    typef_2_max = np.log(max(typef_2_all))
-    typef_2_min = np.log(1)
-
-    normalized_scores['type_1'] = 1 - min_max_norm(
-        np.log(bigram_scores['type_1']),
-        typef_1_min,
-        typef_1_max
-        )
-    normalized_scores['type_2'] = 1 - min_max_norm(
-        np.log(bigram_scores['type_2']),
-        typef_2_min,
-        typef_2_max)
-
     # Entropy, min-max normalize. Optional: limit the range and spread values with cubic root.
-    entropy_1 = bigram_scores['entropy_1']
-    entropy_2 = bigram_scores['entropy_2']
-
-    entropy_1 = entropy_1.apply(
-        compute_functions.threshold_value, 
-        args=(entropy_limits[0], entropy_limits[1])
-        )
-    entropy_2 = entropy_2.apply(
-        compute_functions.threshold_value, 
-        args=(entropy_limits[0], entropy_limits[1])
-        )
-
+    entropy_1 = ngram_scores['entropy_1']
+    entropy_2 = ngram_scores['entropy_2']
+    if entropy_limits:
+        entropy_1 = entropy_1.apply(
+            compute_functions.threshold_value, 
+            args=(entropy_limits[0], entropy_limits[1])
+            )
+        entropy_2 = entropy_2.apply(
+            compute_functions.threshold_value, 
+            args=(entropy_limits[0], entropy_limits[1])
+            )
+        
     if scale_entropy:
         entropy_limits[0] = np.cbrt(entropy_limits[0])
         entropy_limits[1] = np.cbrt(entropy_limits[1])
@@ -296,21 +344,10 @@ def normalize_scores(bigram_scores, corpus, entropy_limits=None, scale_entropy=F
 
     return normalized_scores
 
-def corpus_to_series(corpus_dict):
-    corpus_dict = {corpus: dict(ngram_dist) for corpus, ngram_dist in corpus_dict.items()} 
-    corpus_series = {corpus: pd.Series({ngram: pd.Series(freqs) for ngram, freqs in corpus_freqs.items()}) for corpus, corpus_freqs in corpus_dict.items()}
-    return corpus_series
-
-# def par_bigrams(ngram_chunk, forward_dict, backward_dict, unigram_dict, corpus_proportions):
-#     results = []
-#     for ngram in ngram_chunk:
-#         results.append(get_bigram_scores(ngram, forward_dict, backward_dict, unigram_dict, corpus_proportions))
-#     return results
-
 def partial_ngrams(ngram_chunk, partial_function):
     return list(map(partial_function, ngram_chunk))
 
-def get_mwu_scores(ngrams, parallel=False, ncores=cpu_count() - 1, normalize=False, entropy_limits=None, scale_entropy=None, verbose=False, track_progress=False):
+def get_mwu_scores(ngrams, corpus, parallel=False, ncores=cpu_count() - 1, normalize=False, entropy_limits=None, scale_entropy=None, verbose=False, track_progress=False):
     """
     Main function to compute MWU scores for the given ngrams. Normalization is optional.
     :param ngrams: Iterable of ngrams in string form. Ngrams components should be separated by 
@@ -327,70 +364,52 @@ def get_mwu_scores(ngrams, parallel=False, ncores=cpu_count() - 1, normalize=Fal
     :returns: a dataframe with the MWU scores for each ngram provided. If normalization is true,
         a dictionary with both raw and normalized scores.
     """
-    global forward_dict, backward_dict, unigram_dict, corpus_proportions, backward_merged, n_trigrams
-    forward_dict = processing_corpus.TRIGRAM_FW
-    backward_dict = processing_corpus.TRIGRAM_BW
-    unigram_dict = processing_corpus.UNIGRAM_TOTAL
-    corpus_proportions = processing_corpus.CORPUS_PROPORTIONS
-    backward_merged = processing_corpus.TRIGRAM_MERGED_BW
-    n_trigrams = processing_corpus.N_TRIGRAMS
-    
     if parallel:
-            # Not necessary while using joblib. Could use other more powerful one at some point I guess.
-        # forward_dict = {corpus: {ngram_1: dict(freqs) for ngram_1, freqs in ngram_freqs.items()} for corpus, ngram_freqs in processing_corpus.BIGRAM_FW.items()}
-        # backward_dict = {corpus: {ngram_1: dict(freqs) for ngram_1, freqs in ngram_freqs.items()} for corpus, ngram_freqs in processing_corpus.BIGRAM_BW.items()}
-        # unigram_dict = dict(processing_corpus.UNIGRAM_TOTAL)
-        # corpus_proportions = {data.corpus: data.corpus_prop for _, data in processing_corpus.CORPUS_PROPORTIONS.iterrows()}
+    #         # Not necessary while using joblib. Could use other more powerful one at some point I guess.
+    #     # forward_dict = {corpus: {ngram_1: dict(freqs) for ngram_1, freqs in ngram_freqs.items()} for corpus, ngram_freqs in processing_corpus.BIGRAM_FW.items()}
+    #     # backward_dict = {corpus: {ngram_1: dict(freqs) for ngram_1, freqs in ngram_freqs.items()} for corpus, ngram_freqs in processing_corpus.BIGRAM_BW.items()}
+    #     # unigram_dict = dict(processing_corpus.UNIGRAM_TOTAL)
+    #     # corpus_proportions = {data.corpus: data.corpus_prop for _, data in processing_corpus.CORPUS_PROPORTIONS.iterrows()}
         partial_function = partial(
             get_ngram_scores, 
-            forward_dict=forward_dict, 
-            backward_dict=backward_dict, 
-            unigram_dict=unigram_dict, 
-            corpus_proportions=corpus_proportions,
-            backward_merged=backward_merged,
-            n_trigrams=n_trigrams
+            corpus = corpus
             )
         bigram_chunks = [list(chunks) for chunks in np.array_split(ngrams, ncores)]
         print(f'Number of cores in use: {ncores}')
         with parallel_config(backend='loky'):
             all_scores = Parallel(n_jobs=ncores, verbose=40, pre_dispatch='all')(delayed(partial_ngrams)(chunk, partial_function) for chunk in bigram_chunks)
-        # with Pool(ncores) as pool:
-        #     args = zip(ngrams, repeat(forward_dict), repeat(backward_dict), repeat(unigram_dict), repeat(corpus_proportions))
-        #     all_scores = pool.starmap(get_bigram_scores, args, chunksize=len(ngrams) / ncores)
-        #     all_scores = list(all_scores)
+    #     # with Pool(ncores) as pool:
+    #     #     args = zip(ngrams, repeat(forward_dict), repeat(backward_dict), repeat(unigram_dict), repeat(corpus_proportions))
+    #     #     all_scores = pool.starmap(get_bigram_scores, args, chunksize=len(ngrams) / ncores)
+    #     #     all_scores = list(all_scores)
             all_scores = [ngram for chunk in all_scores for ngram in chunk]
             all_scores = [score for score in all_scores if score] # gets rid of None
 
-    else:
+    # else:
+    if track_progress:
+        i = 0
+    all_scores = []
+    for ngram in ngrams:
+        if verbose:
+            print(ngram)
         if track_progress:
-            i = 0
-        all_scores = []
-        for ngram in ngrams:
-            if verbose:
-                print(ngram)
-            if track_progress:
-                i += 1
-                if i % 1000 == 0:
-                    print(f'{i} ngrams processed')
+            i += 1
+            if i % 1000 == 0:
+                print(f'{i} ngrams processed')
 
-            ngram_scores = get_ngram_scores(
-                ngram,
-                forward_dict,
-                backward_dict,
-                unigram_dict,
-                corpus_proportions,
-                backward_merged,
-                n_trigrams,
-                verbose
-                )
-            if ngram_scores:
-                all_scores.append(ngram_scores)
+        ngram_scores = get_ngram_scores(
+            ngram,
+            corpus,
+            verbose
+            )
+        if ngram_scores:
+            all_scores.append(ngram_scores)
 
     results_dataframe = pd.DataFrame(all_scores)
     results_dataframe['ngram'] = results_dataframe['ngram'].apply(' '.join)
 
     if normalize:
-        results_norm = normalize_scores(results_dataframe, entropy_limits, scale_entropy)
+        results_norm = normalize_scores(results_dataframe, corpus, entropy_limits, scale_entropy)
         return {
             'raw': results_dataframe, 
             'normalized': results_norm

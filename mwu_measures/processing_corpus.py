@@ -82,7 +82,6 @@ class Corpus():
         self.n_trigrams = self.corpus_conn.execute("SELECT SUM(freq) FROM trigram_db").fetchone()[0]
 
     def create_totals(self):
-        print('First time normalizing. Need to consolidate...')
         trigram_maxes = self.corpus_conn.execute(
             """
             WITH trigram_totals AS (
@@ -95,14 +94,14 @@ class Corpus():
             ), type_1 AS (
                 SELECT max(typef_1) as max_type1_trigram
                 FROM (
-                    SELECT ug_3, count( distinct concat(ug_1, ug_2) ) AS typef_1
+                    SELECT ug_3, count( * ) AS typef_1
                     FROM trigram_totals
                     GROUP BY ug_3
                 )
             ), type_2 AS (
                 SELECT max(typef_2) AS max_type2_trigram
                 FROM (
-                    SELECT ug_1, ug_2, count( distinct ug_3 ) AS typef_2
+                    SELECT ug_1, ug_2, count( * ) AS typef_2
                     FROM trigram_totals
                     GROUP BY ug_1, ug_2
                 )
@@ -123,14 +122,14 @@ class Corpus():
             ), type_1 AS (
                 SELECT max(typef_1) AS max_type1_bigram
                 FROM (
-                    SELECT ug_2, count( distinct ug_1 ) AS typef_1
+                    SELECT ug_2, count( * ) AS typef_1
                     FROM bigram_totals
                     GROUP BY ug_2
                 )
             ), type_2 AS (
             SELECT max(typef_2) AS max_type2_bigram
             FROM (
-                SELECT ug_1, count( distinct ug_2 ) AS typef_2
+                SELECT ug_1, count( * ) AS typef_2
                 FROM bigram_totals
                 GROUP BY ug_1
             )
@@ -171,72 +170,6 @@ class Corpus():
         unigram_info = self.corpus_conn.execute("SELECT corpus, ug, freq  FROM unigram_db WHERE ug = ?", [unigram]).fetch_df()
         return unigram_info
 
-
-# class Corpus():
-#     def __init__(self, corpus_name):
-#         self.corpus_name = corpus_name
-#         self.trigram_freqs = defaultdict(Counter)
-#         self.unigram_freqs = defaultdict(Counter)
-#         self.n_trigrams = 0
-#         self.n_unigrams = 0
-#         self.unigram_total = Counter()
-#     def add_chunk(self, line_chunk):
-#         for corpus, unigrams in line_chunk[0].items():
-#             self.unigram_freqs[corpus].update(unigrams)
-#             self.n_unigrams += len(unigrams)
-#             self.unigram_total.update(unigrams)
-#         for corpus, trigrams in line_chunk[1].items():
-#             self.trigram_freqs[corpus].update(trigrams)
-#             self.n_trigrams += len(trigrams)
-#     def query_ngram(self, ngram):
-#         ngram = ngram.split()
-#         if len(ngram) == 2:
-#             counts = defaultdict(Counter)
-#             for corpus, corpus_dict in self.trigram_freqs.items():
-#                 # TODO: ugly :/
-#                 for trigram, frequency in corpus_dict.items():
-#                     if trigram[0] == ngram[0]:
-#                         counts[corpus].update({trigram[1]: frequency})
-#         if len(ngram) == 3:
-#             counts = {corpus: Counter({trigram[2]: frequency for trigram, frequency in corpus_dict.items() if (trigram[0], trigram[1]) == (ngram[0], ngram[1])}) for corpus, corpus_dict in self.trigram_freqs.items()}
-#         return counts
-#     def query_inverse_ngram(self, ngram):
-#         ngram = ngram.split()
-#         if len(ngram) == 2:
-#             counts = defaultdict(Counter)
-#             for corpus, corpus_dict in self.trigram_freqs.items():
-#                 # TODO: ugly :/
-#                 for trigram, frequency in corpus_dict.items():
-#                     if trigram[1] == ngram[1]:
-#                         counts[corpus].update({trigram[0]: frequency})
-#         if len(ngram) == 3:
-#             counts = {corpus: Counter({(trigram[0], trigram[1]): frequency for trigram, frequency in corpus_dict.items() if trigram[2] == ngram[2]}) for corpus, corpus_dict in self.trigram_freqs.items()}
-#         return counts
-
-#     def set_corpus_props(self):
-#         """
-#         Gets the proportion of the total unigrams that each corpus has. 
-#         Necessary for obtaining dispersion measure.
-#         """
-#         print("Computing corpus proportions...")
-#         corpus_sizes = {corpus: dist.total() for corpus, dist in self.unigram_freqs.items()}
-#         corpus_total = np.sum(list(corpus_sizes.values()))
-#         corpus_props = [(corpus, size / corpus_total) for corpus, size in corpus_sizes.items()]
-#         corpus_props = pd.DataFrame(corpus_props, columns=['corpus', 'corpus_prop'])
-#         self.corpus_proportions = corpus_props
-#     def set_totals(self):
-#         print("Computing unigram and trigram totals...")
-#         self.unigram_total = sum(self.unigram_freqs.values(), Counter())
-#         self.n_trigrams = sum(self.trigram_freqs.values(), Counter()).total()
-#     # Clean? 1 appearance per corpus, caput? This would limit the lookup time by a lot
-    
-#     def reduce_frequency(self, ngrams):
-#         occurring_unigrams = flatten([ngram.split() for ngram in ngrams])
-#         reduced_trigrams = {corpus: {trigram: frequency for trigram, frequency in corpus_dict if any(unigram in occurring_unigrams for unigram in trigram)} for corpus, corpus_dict in self.trigram_freqs.items()}
-#         return reduced_trigrams
-
-
-
 def process_corpus(
         corpus_name='bnc',
         corpus_dir=None,
@@ -264,9 +197,8 @@ def process_corpus(
         UNIGRAM_FREQUENCIES_PC, BIGRAM_PER_CORPUS, UNIGRAM_TOTAL,
         BIGRAM_FW, BIGRAM_BW, CORPUS_PROPORTIONS
     """
-    this_corpus = Corpus('bnc')
-    this_corpus = Corpus(corpus_name)
     if corpus_name == 'bnc' and corpus_dir:
+        this_corpus = Corpus(corpus_name)
         with open(corpus_dir, 'r', encoding="utf-8") as corpus_file:
             i = 0
             while True:
@@ -278,9 +210,15 @@ def process_corpus(
                 if verbose:
                     i += len(raw_lines)
                     print(f'{i} lines processed')
-                
-    this_corpus.consolidate_corpus()
-    return this_corpus
+                    
+        this_corpus.consolidate_corpus()
+        return this_corpus
+    if test_corpus:
+        this_corpus = Corpus('test')
+        ngram_dicts = preprocessing_corpus.preprocess_test()
+        this_corpus.add_chunk(ngram_dicts)
+        this_corpus.consolidate_corpus()
+        return this_corpus
     # global UNIGRAM_FREQUENCIES_PC
     # global UNIGRAM_TOTAL
     # global TRIGRAM_FW
