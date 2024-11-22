@@ -2,9 +2,11 @@ import mwu_measures
 import pandas as pd
 import numpy as np
 from line_profiler import LineProfiler
+
+import mwu_measures.processing_corpus_sqlite
 print('its the new one')
 
-bnc_corpus = mwu_measures.process_corpus('bnc', 'bnc_tokenized.txt', chunk_size=1000000, verbose=False)
+bnc_corpus = mwu_measures.processing_corpus_sqlite.process_corpus('bnc', 'small_corpus.txt', chunk_size=500000, verbose=True)
 mwu_examples = pd.read_csv('MultiwordExpression_Concreteness_Ratings.csv')
 mwu_examples['length'] = mwu_examples['Expression'].apply(lambda x: len(x.split()))
 mwu_examples = mwu_examples.loc[(mwu_examples['length'] == 2) | (mwu_examples['length'] == 3)]

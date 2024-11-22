@@ -8,14 +8,7 @@ import numpy as np
 import pandas as pd
 from nltk import flatten
 from . import preprocessing_corpus
-import duckdb
-
-BIGRAM_PER_CORPUS = None
-CORPUS_PROPORTIONS = None
-UNIGRAM_FREQUENCIES_PC = None
-UNIGRAM_TOTAL = None
-BIGRAM_FW = None
-BIGRAM_BW = None
+import sqlite3
 
 # def get_corpus_props(unigram_freqs_pc):
 # ### STILL WORKS
@@ -33,7 +26,8 @@ BIGRAM_BW = None
 
 class Corpus():
     def __init__(self, corpus_name):
-        self.corpus_conn = duckdb.connect(":memory:")
+        self.corpus = sqlite3.connect(":memory:")
+        self.corpus_conn = self.corpus.cursor()
         self.corpus_conn.execute("""
         CREATE TABLE trigram_db_unagg (
             corpus TEXT,
@@ -51,14 +45,15 @@ class Corpus():
             )
             """)
     def add_chunk(self, ngram_lists):
-        print('bah')
         chunk_unigrams, chunk_trigrams = ngram_lists
         chunk_unigrams = pd.DataFrame(chunk_unigrams, columns=['corpus', 'ug', 'freq'])
         chunk_trigrams = pd.DataFrame(chunk_trigrams, columns=['corpus', 'ug_1', 'ug_2', 'ug_3', 'freq'])
-        self.corpus_conn.register('chunk_unigrams', chunk_unigrams)
+        chunk_unigrams.to_sql("chunk_unigrams", self.corpus, index=False)
+        chunk_trigrams.to_sql("chunk_trigrams", self.corpus, index=False)
         self.corpus_conn.execute("INSERT INTO unigram_db_unagg SELECT * FROM chunk_unigrams")
-        self.corpus_conn.register('chunk_trigrams', chunk_trigrams)
         self.corpus_conn.execute("INSERT INTO trigram_db_unagg SELECT * FROM chunk_trigrams")
+        self.corpus_conn.execute("DROP TABLE chunk_unigrams")
+        self.corpus_conn.execute("DROP TABLE chunk_trigrams")
 
     def consolidate_corpus(self):
         self.corpus_conn.execute("""
@@ -77,11 +72,12 @@ class Corpus():
         """)
         self.corpus_conn.execute("DROP TABLE unigram_db_unagg")
         self.corpus_conn.execute("DROP TABLE trigram_db_unagg")
+
         # total unigrams
-        ug_freqs = self.corpus_conn.execute("SELECT ug, SUM(freq) AS freq FROM unigram_db GROUP BY ug").fetch_df()
+        ug_freqs = pd.read_sql("SELECT ug, SUM(freq) AS freq FROM unigram_db GROUP BY ug", self.corpus)
         self.total_unigrams = Counter(dict(zip(ug_freqs.ug, ug_freqs.freq)))
         # corpus proportions
-        self.corpus_proportions = self.corpus_conn.execute("SELECT corpus, SUM(freq) / (SELECT SUM(freq) FROM unigram_db) AS freq FROM unigram_db GROUP BY corpus").fetch_df()
+        self.corpus_proportions = pd.read_sql("SELECT corpus, SUM(freq) / (SELECT SUM(freq) FROM unigram_db) AS freq FROM unigram_db GROUP BY corpus", self.corpus)
         # n_trigrams
         self.n_trigrams = self.corpus_conn.execute("SELECT SUM(freq) FROM trigram_db").fetchone()[0]
 
@@ -112,8 +108,8 @@ class Corpus():
             )
         SELECT token_frequency.max_token_trigram, type_1.max_type1_trigram, type_2.max_type2_trigram
         FROM token_frequency, type_1, type_2
-        """).fetch_df().iloc[0]
-
+        """).fetchall()
+        trigram_maxes = pd.DataFrame(trigram_maxes, columns=['max_token_trigram', 'max_type1_trigram', 'max_type2_trigram'])
         bigram_maxes = self.corpus_conn.execute(
             """
             WITH bigram_totals AS (
@@ -140,68 +136,66 @@ class Corpus():
         )
         SELECT token_frequency.max_token_bigram, type_1.max_type1_bigram, type_2.max_type2_bigram
         FROM token_frequency, type_1, type_2
-        """).fetch_df().iloc[0]
-        self.max_freqs = pd.concat([bigram_maxes, trigram_maxes])
+        """).fetchall()
+        bigram_maxes = pd.DataFrame(bigram_maxes, columns=['max_token_bigram', 'max_type1_bigram', 'max_type2_bigram'])
+        #.fetch_df().iloc[0]
+        self.max_freqs = pd.concat([bigram_maxes.iloc[0], trigram_maxes.iloc[0]])
     def set_getting_functions(self):
-        self.corpus_conn.execute("""
+        self.fw_bigram_query = """
                                  SELECT corpus, ug_1, ug_2, SUM(freq) AS freq 
-                                 FROM trigram_db WHERE ug_1 = $1 
+                                 FROM trigram_db WHERE ug_1 = ?
                                  GROUP BY corpus, ug_1, ug_2
-                                 """)
-        self.corpus_conn.execute("""
+                                 """
+        self.fw_trigram_query = """
                                  SELECT * FROM trigram_db 
-                                 WHERE ug_1 = $1 AND ug_2 = $2
-                                 """)
-        self.corpus_conn.execute("""
+                                 WHERE ug_1 = ? AND ug_2 = ?
+                                 """
+        self.bw_bigram_query = """
                                  SELECT corpus, ug_1, ug_2, SUM(freq) AS freq
                                  FROM trigram_db
-                                 WHERE ug_2 = $1
+                                 WHERE ug_2 = ?
                                  GROUP BY corpus, ug_1, ug_2
-                                 """)
-        self.corpus_conn.execute("""
+                                 """
+        self.bw_trigram_query = """
                                  SELECT *  from trigram_db
-                                 WHERE ug_3 = $1
-                                 """)
-        self.corpus_conn.execute("""
-                                 SELECT corpus, ug, freq
+                                 WHERE ug_3 = ?
+                                 """
+        self.unigram_query = """SELECT corpus, ug, freq
                                  FROM unigram_db 
-                                 WHERE ug = $1
-                                 """)
+                                 WHERE ug = ?
+                                 """
                                  
 
     def get_fw_distribution(self, ngram):
-        ngram = ngram.replace("'", "''")
         ngrams = ngram.split()
         print(ngram)
         if len(ngrams) == 2:
-            distribution = self.corpus_conn.execute(f"EXECUTE get_fw_bigram({repr(ngrams[0])})").fetch_df()
+            distribution = pd.read_sql(self.fw_bigram_query, con=self.corpus, params = [ngrams[0]])
             # TODO: messy, just so I don't have to rewrite calc functions
             distribution = distribution.groupby(by='corpus')[['ug_2', 'freq']].apply(lambda x: Counter(dict(zip(x['ug_2'], x['freq']))))
             distribution = distribution.to_dict()
             # distribution = Counter(dict(zip(distribution.ug_2, distribution.freq)))
         if len(ngrams) == 3:
-            distribution = self.corpus_conn.execute(f"EXECUTE get_fw_trigram({repr(ngrams[0])}, {repr(ngrams[1])})").fetch_df()
+            distribution = pd.read_sql(self.fw_trigram_query, con=self.corpus, params = [ngrams[0], ngrams[1]])
             distribution = distribution.groupby(by='corpus')[['ug_3', 'freq']].apply(lambda x: Counter(dict(zip(x['ug_3'], x['freq']))))
             distribution = distribution.to_dict()
             # distribution = Counter(dict(zip(distribution.ug_3, distribution.freq)))
         return distribution
 
     def get_bw_distribution(self, ngram):
-        ngram = ngram.replace("'", "''")
         ngrams = ngram.split()
         if len(ngrams) == 2:
-            distribution = self.corpus_conn.execute(f"EXECUTE get_bw_bigram({repr(ngrams[1])})").fetch_df()
+            distribution = pd.read_sql(self.bw_bigram_query, con=self.corpus, params = [ngrams[1]])
             distribution = distribution.groupby(by='corpus')[['ug_1', 'freq']].apply(lambda x: Counter(dict(zip(x['ug_1'], x['freq']))))
             distribution = distribution.to_dict()
         if len(ngrams) == 3:
-            distribution = self.corpus_conn.execute(f"EXECUTE get_bw_trigram({repr(ngrams[2])})").fetch_df()
+            distribution = pd.read_sql(self.bw_trigram_query, con=self.corpus, params = [ngrams[2]])
             distribution = distribution.groupby(by='corpus')[['ug_1', 'ug_2', 'freq']].apply(lambda x: Counter(dict(zip(zip(x['ug_1'], x['ug_2']), x['freq']))))
             distribution = distribution.to_dict()
         return distribution
 
     def get_unigram(self, unigram):
-        unigram = unigram.replace("'", "''")
-        unigram_info = self.corpus_conn.execute(f"EXECUTE get_unigram({unigram})").fetch_df()
+        unigram_info = pd.read_sql(self.unigram_query, con=self.corpus, params = [unigram])
         return unigram_info
 
 def process_corpus(

@@ -145,6 +145,7 @@ def get_ngram_scores(ngram, corpus, verbose=False):
         print(f'<<{" ".join([comp_1, comp_2, comp_3])}>> is not in the corpus')
         return None
     # Dispersion
+    corpus_proportions = corpus.corpus_proportions
     dispersion = get_dispersion(ngram_freq, token_freq, corpus_proportions)
     
     # Total frequencies
@@ -170,6 +171,8 @@ def get_ngram_scores(ngram, corpus, verbose=False):
     elif this_type == 'trigram':
         part_1 = (comp_1, comp_2)
         part_2 = comp_3
+    unigram_dict = corpus.total_unigrams
+    n_trigrams = corpus.n_trigrams
     assoc_f, assoc_b = get_association(part_1, part_2, token_freq, unigram_dict, fw_dist, n_trigrams) 
 
 
