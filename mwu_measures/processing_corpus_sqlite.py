@@ -9,6 +9,7 @@ import pandas as pd
 from nltk import flatten
 from . import preprocessing_corpus
 import sqlite3
+from itertools import groupby
 
 # def get_corpus_props(unigram_freqs_pc):
 # ### STILL WORKS
@@ -77,7 +78,7 @@ class Corpus():
         ug_freqs = pd.read_sql("SELECT ug, SUM(freq) AS freq FROM unigram_db GROUP BY ug", self.corpus)
         self.total_unigrams = Counter(dict(zip(ug_freqs.ug, ug_freqs.freq)))
         # corpus proportions
-        self.corpus_proportions = pd.read_sql("SELECT corpus, SUM(freq) / (SELECT SUM(freq) FROM unigram_db) AS freq FROM unigram_db GROUP BY corpus", self.corpus)
+        self.corpus_proportions = pd.read_sql("SELECT corpus, SUM(1.0 * freq) / (SELECT SUM(freq) FROM unigram_db) AS freq FROM unigram_db GROUP BY corpus", self.corpus)
         # n_trigrams
         self.n_trigrams = self.corpus_conn.execute("SELECT SUM(freq) FROM trigram_db").fetchone()[0]
 
@@ -163,35 +164,26 @@ class Corpus():
         self.unigram_query = """SELECT corpus, ug, freq
                                  FROM unigram_db 
                                  WHERE ug = ?
-                                 """
-                                 
+                                 """               
 
     def get_fw_distribution(self, ngram):
         ngrams = ngram.split()
-        print(ngram)
         if len(ngrams) == 2:
-            distribution = pd.read_sql(self.fw_bigram_query, con=self.corpus, params = [ngrams[0]])
-            # TODO: messy, just so I don't have to rewrite calc functions
-            distribution = distribution.groupby(by='corpus')[['ug_2', 'freq']].apply(lambda x: Counter(dict(zip(x['ug_2'], x['freq']))))
-            distribution = distribution.to_dict()
-            # distribution = Counter(dict(zip(distribution.ug_2, distribution.freq)))
+            queried_ngram = self.corpus_conn.execute(self.fw_bigram_query, [ngrams[0]]).fetchall()
+            distribution = {corpus: Counter({v[2]: v[3] for v in vs}) for corpus, vs in groupby(queried_ngram, lambda x: x[0])}
         if len(ngrams) == 3:
-            distribution = pd.read_sql(self.fw_trigram_query, con=self.corpus, params = [ngrams[0], ngrams[1]])
-            distribution = distribution.groupby(by='corpus')[['ug_3', 'freq']].apply(lambda x: Counter(dict(zip(x['ug_3'], x['freq']))))
-            distribution = distribution.to_dict()
-            # distribution = Counter(dict(zip(distribution.ug_3, distribution.freq)))
+            queried_ngram = self.corpus_conn.execute(self.fw_trigram_query, [ngrams[0], ngrams[1]]).fetchall()
+            distribution = {corpus: Counter({v[3]: v[4] for v in vs}) for corpus, vs in groupby(queried_ngram, lambda x: x[0])}
         return distribution
 
     def get_bw_distribution(self, ngram):
         ngrams = ngram.split()
         if len(ngrams) == 2:
-            distribution = pd.read_sql(self.bw_bigram_query, con=self.corpus, params = [ngrams[1]])
-            distribution = distribution.groupby(by='corpus')[['ug_1', 'freq']].apply(lambda x: Counter(dict(zip(x['ug_1'], x['freq']))))
-            distribution = distribution.to_dict()
+            queried_ngram = self.corpus_conn.execute(self.bw_bigram_query, [ngrams[1]]).fetchall()
+            distribution = {corpus: Counter({v[1]: v[3] for v in vs}) for corpus, vs in groupby(queried_ngram, lambda x: x[0])}
         if len(ngrams) == 3:
-            distribution = pd.read_sql(self.bw_trigram_query, con=self.corpus, params = [ngrams[2]])
-            distribution = distribution.groupby(by='corpus')[['ug_1', 'ug_2', 'freq']].apply(lambda x: Counter(dict(zip(zip(x['ug_1'], x['ug_2']), x['freq']))))
-            distribution = distribution.to_dict()
+            queried_ngram = self.corpus_conn.execute(self.bw_trigram_query, [ngrams[2]]).fetchall()
+            distribution = {corpus: Counter({(v[1], v[2]): v[4] for v in vs}) for corpus, vs in groupby(queried_ngram, lambda x: x[0])}
         return distribution
 
     def get_unigram(self, unigram):

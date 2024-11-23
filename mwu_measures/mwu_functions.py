@@ -393,7 +393,7 @@ def get_mwu_scores(ngrams, corpus, parallel=False, ncores=cpu_count() - 1, norma
         i = 0
     all_scores = []
     for ngram in ngrams:
-        # TODO: executemany with all ngrams? and then a dictionary? I could send the parser inside the function? Is that optimized?
+        # TODO: executemany with all ngrams? and then a dictionary? I could send the parser inside the function? Is that optimized?git
         if verbose:
             print(ngram)
         if track_progress:
