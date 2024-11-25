@@ -55,24 +55,15 @@ class Corpus():
                 freq INTEGER
                 )
         """)
-        self.trigram_pl = pl.DataFrame(
-            schema={'corpus':pl.String, 'ug_1': pl.String, 'ug_2': pl.String, 'ug_3': pl.String, 'freq': pl.Int64},
-            orient='row')
+
     def add_chunk(self, ngram_lists):
         chunk_unigrams, chunk_trigrams = ngram_lists
         chunk_unigrams = pd.DataFrame(chunk_unigrams, columns=['corpus', 'ug', 'freq'])
         chunk_trigrams = pd.DataFrame(chunk_trigrams, columns=['corpus', 'ug_1', 'ug_2', 'ug_3', 'freq'])
-        # self.corpus_conn.register('chunk_unigrams', chunk_unigrams)
         self.corpus_conn.execute("INSERT INTO unigram_db_unagg SELECT * FROM chunk_unigrams")
-        # self.corpus_conn.register('chunk_trigrams', chunk_trigrams)
         self.corpus_conn.execute("INSERT INTO trigram_db_unagg SELECT * FROM chunk_trigrams")
-    
-    def add_chunk_polars(self, ngram_lists):
-        chunk_unigrams, chunk_trigrams = ngram_lists
-        chunk_unigrams = pl.DataFrame(chunk_unigrams, schema={'corpus': pl.String, 'ug': pl.String, 'freq': pl.Int64}, orient='row')
-        chunk_trigrams = pl.DataFrame(chunk_trigrams, schema={'corpus': pl.String, 'ug_1': pl.String, 'ug_2': pl.String, 'ug_3': pl.String, 'freq': pl.Int64}, orient='row')
-        self.corpus_conn.execute("INSERT INTO unigram_db_unagg_test SELECT * FROM chunk_unigrams")
-        self.corpus_conn.execute("INSERT INTO trigram_db_unagg_test SELECT * FROM chunk_trigrams")
+        self.corpus_conn.execute("VACUUM ANALYZE")
+
 
     def consolidate_corpus(self):
         self.corpus_conn.execute(
@@ -111,8 +102,20 @@ class Corpus():
                 corpus,
                 ug
         """)
+        self.corpus_conn.execute(
+            """
+            ALTER TABLE unigram_db ADD
+                hash_index UINT64
+            """)
+        self.corpus_conn.execute("""
+            UPDATE unigram_db
+            SET 
+                hash_index = hash(ug)
+        """)
+        self.corpus_conn.execute("VACUUM ANALYZE")
         self.corpus_conn.execute("DROP TABLE unigram_db_unagg")
         self.corpus_conn.execute("DROP TABLE trigram_db_unagg")
+        
         # total unigrams
         ug_freqs = self.corpus_conn.execute(
             """

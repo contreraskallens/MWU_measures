@@ -6,31 +6,51 @@ Here I provided procedures to preprocess a couple of common corpora.
 Anything other than that should be included by user.
 """
 
-import re
 from collections import defaultdict, Counter
-from itertools import groupby
-from nltk import flatten
+from itertools import groupby, islice
 from nltk.util import trigrams as get_trigrams
+import pandas as pd
 
+# def clean_bnc_line(this_line):
+#     """
+#     Takes a line from the tokenized BNC corpus and returns a list of cleaned tokens.
+#     """
+#     this_line = re.sub(r'^.+\t', '', this_line).lower()
+#     this_line = re.sub(r" (n't|'s|'ll|'d|'re|'ve|'m)", r'\1', this_line)
+#     this_line = this_line.replace('wan na', 'wanna')
+#     this_line = this_line.replace('\n', '')
+#     this_line = this_line.replace('-', '')
+#     # Get rid of standalone punctuation and double (and more) spaces
+#     this_line = re.sub(r'\s\d+\s|^\d+\s|\s\d+$', ' NUMBER ', this_line).strip()
+#     this_line = re.sub(r'\s\W+\s|\s\W+|^\W\s$|\s+', ' ', this_line).strip()
+#     this_line = this_line.split()
+#     return this_line
 
-def clean_bnc_line(this_line):
+def clean_bnc_lines(raw_lines):
     """
-    Takes a line from the tokenized BNC corpus and returns a list of cleaned tokens.
+    Takes a line from the tokenized BNC corpus and returns a list of cleaned lines
     """
-    this_line = re.sub(r'^.+\t', '', this_line).lower()
-    this_line = re.sub(r" (n't|'s|'ll|'d|'re|'ve|'m)", r'\1', this_line)
-    this_line = this_line.replace('wan na', 'wanna')
-    this_line = this_line.replace('\n', '')
-    this_line = this_line.replace('-', '')
-    # Get rid of standalone punctuation and double (and more) spaces
-    this_line = re.sub(r'\s\d+\s|^\d+\s|\s\d+$', ' NUMBER ', this_line).strip()
-    this_line = re.sub(r'\s\W+\s|\s\W+|^\W\s$|\s+', ' ', this_line).strip()
-    this_line = this_line.split()
-    return this_line
+    x = pd.Series(raw_lines)
+    corpus_list = x.str.extract(r'(^.)', expand=False)
+    y = x.str.replace(r'^.+\t', '', regex=True)
+    y = y.str.lower()
+    y = y.str.replace(r" (n't|'s|'ll|'d|'re|'ve|'m)", r"\1", regex=True)
+    y = y.str.replace('wan na', 'wanna', regex = False)
+    y = y.str.replace('\n', '')
+    y = y.str.replace('-', '')
+    y = y.str.replace(r'\s\d+\s|^\d+\s|\s\d+$', ' NUMBER ', regex=True)
+    y = y.str.strip()
+    y = y.str.replace(r'\s\W+\s|\s\W+|^\W\s$|\s+', ' ', regex=True)
+    y = y.str.strip()
+    return list(zip(corpus_list, y.to_list()))
 
 def make_bigram_dict():
     this_dict = defaultdict(Counter)
     return this_dict
+
+def generate_trigrams(text):
+    words = text.split()
+    return list(zip(words, islice(words, 1, None), islice(words, 2, None)))
 
 def preprocess_test():
     # unigram_freqs = defaultdict(Counter)
@@ -80,16 +100,25 @@ def preprocess_bnc(raw_lines):
         of each element within that corpus.
     """
     # #for BNC, you want to provide the bnc_tokenized.txt file
-    org_items = groupby(raw_lines, key=lambda x: re.match(r'(^.)', x).group(1))
-    unigrams = {key:[clean_bnc_line(line) for line in group] for key, group in org_items
-                }
-    trigrams = {
-        key:[trigram for line in group for trigram in get_trigrams(line) if len(line) > 1]
-        for key, group in unigrams.items()
-    }
-    trigrams = {corpus: Counter(trigrams) for corpus, trigrams in trigrams.items()}
-    trigrams = [(corpus, ngram[0], ngram[1], ngram[2], freq) for corpus, corpus_dict in trigrams.items() for ngram, freq in corpus_dict.items()]
+    # org_items = groupby(raw_lines, key=lambda x: re.match(r'(^.)', x).group(1))
+    # unigrams = {key:[clean_bnc_line(line) for line in group] for key, group in org_items
+    #             }
+    # trigrams = {
+    #     key:[trigram for line in group for trigram in get_trigrams(line) if len(line) > 1]
+    #     for key, group in unigrams.items()
+    # }
+    # trigrams = {corpus: Counter(trigrams) for corpus, trigrams in trigrams.items()}
+    # trigrams = [(corpus, ngram[0], ngram[1], ngram[2], freq) for corpus, corpus_dict in trigrams.items() for ngram, freq in corpus_dict.items()]
 
-    unigrams = {corpus: Counter(flatten(unigrams)) for corpus, unigrams in unigrams.items()}
+    # unigrams = {corpus: Counter(flatten(unigrams)) for corpus, unigrams in unigrams.items()}
+    # unigrams = [(corpus, ngram, freq) for corpus, corpus_dict in unigrams.items() for ngram, freq in corpus_dict.items()]
+    # return unigrams, trigrams
+    this_lines = clean_bnc_lines(raw_lines)
+    org_items = groupby(this_lines, key=lambda x: x[0])
+    unigrams = {key:[line[1] for line in group] for key, group in org_items}
+    trigrams = {key: Counter([trigram for line in group for trigram in list(generate_trigrams(line))]) for key, group in unigrams.items()}
+    trigrams = [(corpus, *ngram, freq) for corpus, corpus_dict in trigrams.items() for ngram, freq in corpus_dict.items()]
+
+    unigrams = {corpus: Counter([unigram for line in corpus_lines for unigram in line.split()]) for corpus, corpus_lines in unigrams.items()}
     unigrams = [(corpus, ngram, freq) for corpus, corpus_dict in unigrams.items() for ngram, freq in corpus_dict.items()]
     return unigrams, trigrams
