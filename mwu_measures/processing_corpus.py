@@ -10,6 +10,9 @@ import pandas as pd
 from nltk import flatten
 from . import preprocessing_corpus
 import duckdb
+import polars as pl
+from line_profiler import LineProfiler
+lp = LineProfiler()
 
 
 class Corpus():
@@ -33,15 +36,44 @@ class Corpus():
                 freq INTEGER
                 )
         """)
+
+        self.corpus_conn.execute(
+            """
+            CREATE TABLE trigram_db_unagg_test (
+                corpus TEXT,
+                ug_1 TEXT,
+                ug_2 TEXT,
+                ug_3 TEXT,
+                freq INTEGER
+                )
+        """)
+        self.corpus_conn.execute(
+            """
+            CREATE TABLE unigram_db_unagg_test (
+                corpus TEXT,
+                ug TEXT,
+                freq INTEGER
+                )
+        """)
+        self.trigram_pl = pl.DataFrame(
+            schema={'corpus':pl.String, 'ug_1': pl.String, 'ug_2': pl.String, 'ug_3': pl.String, 'freq': pl.Int64},
+            orient='row')
     def add_chunk(self, ngram_lists):
         chunk_unigrams, chunk_trigrams = ngram_lists
         chunk_unigrams = pd.DataFrame(chunk_unigrams, columns=['corpus', 'ug', 'freq'])
         chunk_trigrams = pd.DataFrame(chunk_trigrams, columns=['corpus', 'ug_1', 'ug_2', 'ug_3', 'freq'])
-        self.corpus_conn.register('chunk_unigrams', chunk_unigrams)
+        # self.corpus_conn.register('chunk_unigrams', chunk_unigrams)
         self.corpus_conn.execute("INSERT INTO unigram_db_unagg SELECT * FROM chunk_unigrams")
-        self.corpus_conn.register('chunk_trigrams', chunk_trigrams)
+        # self.corpus_conn.register('chunk_trigrams', chunk_trigrams)
         self.corpus_conn.execute("INSERT INTO trigram_db_unagg SELECT * FROM chunk_trigrams")
     
+    def add_chunk_polars(self, ngram_lists):
+        chunk_unigrams, chunk_trigrams = ngram_lists
+        chunk_unigrams = pl.DataFrame(chunk_unigrams, schema={'corpus': pl.String, 'ug': pl.String, 'freq': pl.Int64}, orient='row')
+        chunk_trigrams = pl.DataFrame(chunk_trigrams, schema={'corpus': pl.String, 'ug_1': pl.String, 'ug_2': pl.String, 'ug_3': pl.String, 'freq': pl.Int64}, orient='row')
+        self.corpus_conn.execute("INSERT INTO unigram_db_unagg_test SELECT * FROM chunk_unigrams")
+        self.corpus_conn.execute("INSERT INTO trigram_db_unagg_test SELECT * FROM chunk_trigrams")
+
     def consolidate_corpus(self):
         self.corpus_conn.execute(
             """
@@ -351,7 +383,6 @@ def process_corpus(
                 if verbose:
                     i += len(raw_lines)
                     print(f'{i} lines processed')
-                    
         this_corpus.consolidate_corpus()
         this_corpus.set_getting_functions()
         return this_corpus
@@ -362,3 +393,4 @@ def process_corpus(
         this_corpus.consolidate_corpus()
         this_corpus.set_getting_functions()
         return this_corpus
+    
