@@ -74,18 +74,20 @@ class Corpus():
                 ug_1,
                 ug_2,
                 ug_3,
+                CONCAT(ug_1, ' ', ug_2) AS big_1,
                 SUM(freq) AS freq
             FROM trigram_db_unagg
             GROUP BY 
                 corpus,
                 ug_1,
                 ug_2,
-                ug_3
+                ug_3,
+                big_1
             ORDER BY
                 corpus,
                 ug_1,
                 ug_2,
-                ug_3
+                ug_3, big_1
         """)
         self.corpus_conn.execute(
             """

@@ -26,8 +26,10 @@ class Fetcher():
             bigrams = [[' '.join(ngram), ngram[1]] for ngram in all_ngrams if len(ngram) == 2]
             source = 'ug_2'
             target = 'ug_1'
-        
         bigrams = pd.DataFrame(bigrams, columns = ['query', source])
+
+
+    def fetch_scores(self, source, target, query_df, mode):
         self.conn.execute(
             f"""
             CREATE OR REPLACE TEMPORARY TABLE this_query (query TEXT, {source} TEXT, hash_index UINT64)
@@ -71,7 +73,7 @@ class Fetcher():
                 ug_2
             ORDER BY {source}, freq DESC
         """)
-        # This could be a different function to keep bigrams and trigrams together. Target/Source could be ' '.join(ug_1, ug_2)
+        # This could be a different function to keep bigrams and trigrams together. Target/Source could be ' '.join(ug_1, ug_2). Pack results? Pack query?
         self.conn.execute(
             f"""
             CREATE OR REPLACE TABLE dist_table AS 
