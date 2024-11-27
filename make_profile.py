@@ -21,6 +21,7 @@ def get_all_dists_filter_before(ngrams):
     all_ngrams = [ngram.split() for ngram in ngrams]
     bigrams_fw = [[' '.join(ngram), ngram[0]] for ngram in all_ngrams if len(ngram) == 2]
     bigrams_fw = pd.DataFrame(bigrams_fw, columns = ['query', 'ug_1'])
+    
     # this_corpus.corpus_conn.executemany("INSERT INTO bigram_fw_query VALUES (?, ?)", bigrams_fw)
     this_corpus.corpus_conn.execute("INSERT INTO this_query SELECT *, hash(ug_1) as hash_index FROM bigrams_fw")
     # this_corpus.corpus_conn.execute("CREATE OR REPLACE TABLE this_query AS (SELECT query, ug_1, hash(ug_1) as hash_index FROM bigram_fw_query)")
@@ -91,10 +92,6 @@ def get_all_dists_filter_before(ngrams):
     print('Organizing...')
     bigrams_fw = orjson.loads(bigrams_fw)
     print(f'{len(bigrams_fw)} bigrams in chunk')
-
-this_corpus.corpus_conn.execute("ALTER TABLE trigram_db ADD COLUMN hash_index UINT64")
-this_corpus.corpus_conn.execute("UPDATE trigram_db SET hash_index = hash(ug_1)")
-
 
 
 # lp_wrapper_filter_before(ngram_selection)
