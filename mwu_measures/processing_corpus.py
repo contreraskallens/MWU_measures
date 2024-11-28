@@ -65,7 +65,49 @@ class Corpus():
         self.corpus_conn.execute("VACUUM ANALYZE")
 
 
-    def consolidate_corpus(self):
+    def consolidate_corpus(self, threshold=1):
+        self.corpus_conn.execute(
+            """
+            CREATE TABLE drop_table_trigrams AS(
+                SELECT 
+                    CONCAT_WS(' ', ug_1, ug_2, ug_3) AS ngram,
+                    SUM(freq) as freq
+                FROM trigram_db_unagg
+                GROUP BY(ngram)
+            )
+        """)
+        self.corpus_conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE drop_table_trigrams AS(
+            SELECT 
+                *, 
+                hash(ngram) AS ngram_hash
+            FROM drop_table_trigrams
+            WHERE freq <= {threshold}
+        )
+        """)
+
+        self.corpus_conn.execute(
+            """
+            CREATE TABLE drop_table_bigrams AS (
+                SELECT 
+                    CONCAT_WS(' ', ug_1, ug_2) AS ngram,
+                    SUM(freq) as freq
+                FROM trigram_db_unagg
+                GROUP BY(ngram)
+            )
+        """)
+        self.corpus_conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE drop_table_bigrams AS(
+            SELECT 
+                *, 
+                hash(ngram) AS ngram_hash
+            FROM drop_table_bigrams
+            WHERE freq <= {threshold}
+        )
+        """)
+
         self.corpus_conn.execute(
             """
             CREATE TABLE trigram_db AS
@@ -74,7 +116,8 @@ class Corpus():
                 ug_1,
                 ug_2,
                 ug_3,
-                CONCAT(ug_1, ' ', ug_2) AS big_1,
+                CONCAT_WS(' ', ug_1, ug_2) AS big_1,
+                CONCAT_WS(' ', ug_1, ug_2, ug_3) as ngram,
                 SUM(freq) AS freq
             FROM trigram_db_unagg
             GROUP BY 
@@ -87,7 +130,7 @@ class Corpus():
                 corpus,
                 ug_1,
                 ug_2,
-                ug_3, big_1
+                ug_3
         """)
         self.corpus_conn.execute(
             """
@@ -114,10 +157,8 @@ class Corpus():
             SET 
                 hash_index = hash(ug)
         """)
-        self.corpus_conn.execute("VACUUM ANALYZE")
         self.corpus_conn.execute("DROP TABLE unigram_db_unagg")
         self.corpus_conn.execute("DROP TABLE trigram_db_unagg")
-        
         # total unigrams
         ug_freqs = self.corpus_conn.execute(
             """
@@ -130,17 +171,20 @@ class Corpus():
         ug_freqs = ug_freqs.fetch_df()
         self.total_unigrams = Counter(dict(zip(ug_freqs.ug, ug_freqs.freq)))
         # corpus proportions
-        self.corpus_proportions = self.corpus_conn.execute(
+        self.corpus_conn.execute(
             """
-            SELECT 
-                corpus,
-                SUM(freq) / (SELECT SUM(freq) FROM unigram_db) 
-            AS freq FROM unigram_db GROUP BY corpus
+            CREATE TABLE corpus_proportions AS
+                SELECT 
+                    corpus,
+                    SUM(freq) / (SELECT SUM(freq) FROM unigram_db) AS corpus_prop
+                FROM unigram_db 
+                GROUP BY corpus
         """)
-        
+        self.corpus_proportions = self.corpus_conn.execute("SELECT * FROM corpus_proportions")
         self.corpus_proportions = self.corpus_proportions.fetch_df()
         self.n_trigrams = self.corpus_conn.execute("SELECT SUM(freq) FROM trigram_db").fetchone()[0]
-
+        
+        self.corpus_conn.execute("VACUUM ANALYZE")
     def create_totals(self):
         trigram_maxes = self.corpus_conn.execute(
             """
