@@ -186,8 +186,9 @@ class Corpus():
         
         self.corpus_conn.execute("VACUUM ANALYZE")
     def create_totals(self):
-        trigram_maxes = self.corpus_conn.execute(
+        self.corpus_conn.execute(
             """
+            CREATE OR REPLACE TABLE trigram_totals AS
             WITH trigram_totals AS (
                 SELECT 
                     ug_1,
@@ -227,18 +228,20 @@ class Corpus():
                 )
             )
             SELECT
-                token_frequency.max_token_trigram,
-                type_1.max_type1_trigram,
-                type_2.max_type2_trigram
+                token_frequency.max_token_trigram AS max_token,
+                type_1.max_type1_trigram AS max_type1,
+                type_2.max_type2_trigram AS max_type2,
+                3 as ngram_length
             FROM 
                 token_frequency,
                 type_1,
                 type_2
         """)
-        trigram_maxes = trigram_maxes.fetch_df().iloc[0]
+        # trigram_maxes = trigram_maxes.fetch_df().iloc[0]
 
-        bigram_maxes = self.corpus_conn.execute(
+        self.corpus_conn.execute(
             """
+            CREATE OR REPLACE TABLE bigram_totals AS
             WITH bigram_totals AS (
                 SELECT
                     ug_1,
@@ -272,16 +275,27 @@ class Corpus():
                 )
             )
             SELECT
-                token_frequency.max_token_bigram,
-                type_1.max_type1_bigram,
-                type_2.max_type2_bigram
+                token_frequency.max_token_bigram AS max_token,
+                type_1.max_type1_bigram AS max_type1,
+                type_2.max_type2_bigram AS max_type2,
+                2 AS ngram_length
             FROM 
                 token_frequency,
                 type_1,
                 type_2
         """)
-        bigram_maxes = bigram_maxes.fetch_df().iloc[0]
-        self.max_freqs = pd.concat([bigram_maxes, trigram_maxes])
+
+        self.corpus_conn.execute(
+            """
+            CREATE OR REPLACE TABLE ngram_totals AS
+            SELECT *
+            FROM trigram_totals
+            UNION ALL 
+            SELECT *
+            FROM bigram_totals
+        """)
+        # bigram_maxes = bigram_maxes.fetch_df().iloc[0]
+        # self.max_freqs = pd.concat([bigram_maxes, trigram_maxes])
         
     def set_getting_functions(self):
         print("we bring the boom")
