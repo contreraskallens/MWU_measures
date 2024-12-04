@@ -159,31 +159,7 @@ class Corpus():
         """)
         self.corpus_conn.execute("DROP TABLE unigram_db_unagg")
         self.corpus_conn.execute("DROP TABLE trigram_db_unagg")
-        # total unigrams
-        ug_freqs = self.corpus_conn.execute(
-            """
-            SELECT
-                ug,
-                SUM(freq) AS freq
-            FROM unigram_db 
-            GROUP BY ug
-        """)
-        ug_freqs = ug_freqs.fetch_df()
-        self.total_unigrams = Counter(dict(zip(ug_freqs.ug, ug_freqs.freq)))
-        # corpus proportions
-        self.corpus_conn.execute(
-            """
-            CREATE TABLE corpus_proportions AS
-                SELECT 
-                    corpus,
-                    SUM(freq) / (SELECT SUM(freq) FROM unigram_db) AS corpus_prop
-                FROM unigram_db 
-                GROUP BY corpus
-        """)
-        self.corpus_proportions = self.corpus_conn.execute("SELECT * FROM corpus_proportions")
-        self.corpus_proportions = self.corpus_proportions.fetch_df()
-        self.n_trigrams = self.corpus_conn.execute("SELECT SUM(freq) FROM trigram_db").fetchone()[0]
-        
+                
         self.corpus_conn.execute("VACUUM ANALYZE")
     def create_totals(self):
         self.corpus_conn.execute(
@@ -237,7 +213,6 @@ class Corpus():
                 type_1,
                 type_2
         """)
-        # trigram_maxes = trigram_maxes.fetch_df().iloc[0]
 
         self.corpus_conn.execute(
             """
@@ -249,25 +224,7 @@ class Corpus():
                     SUM(freq) as freq
                 FROM trigram_db
                 GROUP BY 
-                    ug_1,
-                    ug_2
-            ), token_frequency AS (
-                SELECT 
-                    max(freq) AS max_token_bigram
-                FROM bigram_totals
-            ), type_1 AS (
-                SELECT 
-                    max(typef_1) AS max_type1_bigram
-                FROM (
-                    SELECT
-                        ug_2,
-                        count( * ) AS typef_1
-                    FROM bigram_totals
-                    GROUP BY ug_2
-                )
-            ), type_2 AS (
-                SELECT max(typef_2) AS max_type2_bigram
-                FROM (
+                    ug_1,function with (source, target) arguments and f strings
                     SELECT ug_1,
                     count( * ) AS typef_2
                 FROM bigram_totals
@@ -294,115 +251,16 @@ class Corpus():
             SELECT *
             FROM bigram_totals
         """)
-        # bigram_maxes = bigram_maxes.fetch_df().iloc[0]
-        # self.max_freqs = pd.concat([bigram_maxes, trigram_maxes])
-        
-    def set_getting_functions(self):
-        print("we bring the boom")
-        # self.corpus_conn.execute(
-        #     """
-        #     CREATE OR REPLACE TEMPORARY TABLE bigram_fw_query
-        #         (query TEXT,
-        #         corpus TEXT,
-        #         ug_2 TEXT,
-        #         freq INT)
-        # """)
-        # self.corpus_conn.execute(
-        #     """
-        #     CREATE OR REPLACE TEMPORARY TABLE trigram_fw_query
-        #         (query TEXT,
-        #         corpus TEXT,
-        #         ug_3 TEXT,
-        #         freq INT)
-        # """)
-        # self.fw_bigram_query = """
-        #     INSERT INTO bigram_fw_query
-        #     SELECT 
-        #         ? AS query,
-        #         corpus,
-        #         ug_2,
-        #         SUM(freq) AS freq 
-        #     FROM trigram_db WHERE ug_1 = ?
-        #     GROUP BY
-        #         corpus,
-        #         ug_2
-        # """
-        # self.fw_trigram_query = """
-        #     INSERT INTO trigram_fw_query
-        #     SELECT
-        #         ? AS query,
-        #         corpus,
-        #         ug_3,
-        #         freq
-        #     FROM trigram_db 
-        #     WHERE ug_1 = ? AND ug_2 = ?
-        # """
-        # self.corpus_conn.execute("""
-        #     CREATE OR REPLACE TEMPORARY TABLE bigram_bw_query 
-        #                          (query TEXT,
-        #                          corpus TEXT,
-        #                          ug_2 TEXT,
-        #                          freq INT)
-        #     """)
-        # self.corpus_conn.execute("""
-        #     CREATE OR REPLACE TEMPORARY TABLE trigram_bw_query
-        #                         (query TEXT,
-        #                         corpus TEXT,
-        #                         ug_1 TEXT,
-        #                         ug_2 TEXT,
-        #                         freq INT)
-        # """)
-        # self.bw_bigram_query = """
-        #     INSERT INTO bigram_bw_query
-        #     SELECT 
-        #         ? AS query,
-        #         corpus,
-        #         ug_1,
-        #         SUM(freq) AS freq
-        #     FROM trigram_db
-        #     WHERE ug_2 = ?
-        #     GROUP BY
-        #         corpus,
-        #         ug_2
-        # """
-        # self.bw_trigram_query = """
-        #     INSERT INTO trigram_bw_query
-        #     SELECT
-        #         ? AS query,
-        #         corpus,
-        #         ug_1,
-        #         ug_2,
-        #         freq from trigram_db
-        #     WHERE ug_3 = ?
-        # """
-        # self.unigram_query = """
-        #     SELECT
-        #         corpus,
-        #         ug,
-        #         freq
-        #     FROM unigram_db 
-        #     WHERE ug = ?
-        # """
 
-    def get_fw_distribution(self, ngram):
-        ngrams = ngram.split()
-        if len(ngrams) == 2:
-            queried_ngram = self.corpus_conn.execute(self.fw_bigram_query, [ngrams[0]]).fetchall()
-            distribution = {corpus: Counter({v[2]: v[3] for v in vs}) for corpus, vs in groupby(queried_ngram, lambda x: x[0])}
-        if len(ngrams) == 3:
-            queried_ngram = self.corpus_conn.execute(self.fw_trigram_query, [ngrams[0], ngrams[1]]).fetchall()
-            distribution = {corpus: Counter({v[3]: v[4] for v in vs}) for corpus, vs in groupby(queried_ngram, lambda x: x[0])}
-        return distribution
-
-    def get_bw_distribution(self, ngram):
-        ngrams = ngram.split()
-        if len(ngrams) == 2:
-            queried_ngram = self.corpus_conn.execute(self.bw_bigram_query, [ngrams[1]]).fetchall()
-            distribution = {corpus: Counter({v[1]: v[3] for v in vs}) for corpus, vs in groupby(queried_ngram, lambda x: x[0])}
-        if len(ngrams) == 3:
-            queried_ngram = self.corpus_conn.execute(self.bw_trigram_query, [ngrams[2]]).fetchall()
-            distribution = {corpus: Counter({(v[1], v[2]): v[4] for v in vs}) for corpus, vs in groupby(queried_ngram, lambda x: x[0])}
-        return distribution
+        self.corpus_conn.execute(
+            """
+            CREATE TABLE corpus_proportions AS
+                SELECT 
+                    corpus,
+                    SUM(freq) / (SELECT SUM(freq) FROM unigram_db) AS corpus_prop
+                FROM unigram_db 
+                GROUP BY corpus
+        """)
 
     def get_unigram(self, unigram):
         unigram_info = self.corpus_conn.execute(f"EXECUTE get_unigram({unigram})").fetch_df()
@@ -446,14 +304,11 @@ def process_corpus(
                 if verbose:
                     i += len(raw_lines)
                     print(f'{i} lines processed')
-        this_corpus.consolidate_corpus()
-        this_corpus.set_getting_functions()
-        return this_corpus
     if test_corpus:
         this_corpus = Corpus('test')
         ngram_dicts = preprocessing_corpus.preprocess_test()
         this_corpus.add_chunk(ngram_dicts)
-        this_corpus.consolidate_corpus()
-        this_corpus.set_getting_functions()
-        return this_corpus
-    
+
+    this_corpus.consolidate_corpus()
+    this_corpus.create_totals()    
+    return this_corpus
