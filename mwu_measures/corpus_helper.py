@@ -1,7 +1,6 @@
 import pandas as pd
-from orjson import loads
-import numpy as np
-from functools import reduce
+import re
+from nltk import everygrams
 default_weights = {'token_freq': 1/8, 'dispersion': 1/8, 'type_1': 1/8, 'type_2': 1/8, 'entropy_1': 1/8, 'entropy_2': 1/8, 'fw_assoc': 1/8, 'bw_assoc': 1/8}
 
 
@@ -20,6 +19,7 @@ class Fetcher():
         self.corpus.create_query(ngrams, source, target)
 
     def create_scores(self, ngrams):
+        ngrams = list(set(ngrams))
         bigrams = []
         trigrams = []
 
@@ -49,7 +49,8 @@ class Fetcher():
             mwu_measures = self.bigram_scores[mode].loc[(self.bigram_scores[mode].ug_1 == ug_1) & (self.bigram_scores[mode].ug_2 == ug_2)]
             mwu_measures = mwu_measures.rename(columns={'ug_1': 'comp_1', 'ug_2': 'comp_2'})
             if len(mwu_measures) == 0:
-                raise Exception("No data for this bigram")
+                print(f"No data for bigram {ngram}")
+                return None
             else: 
                 return mwu_measures
         elif len(split_ngram) == 3:
@@ -60,7 +61,8 @@ class Fetcher():
             second_mwu = self.trigram_scores[mode].loc[(self.trigram_scores[mode].big_1 == big_1) & (self.trigram_scores[mode].ug_3 == ug_3)]
             second_mwu = second_mwu.rename(columns={'big_1': 'comp_1', 'ug_3': 'comp_2'})
             if len(first_mwu) == 0 or len(second_mwu) == 0:
-                raise Exception("No data for this trigram")
+                print(f"No data for trigram {ngram}")
+                return None
             else:
                 return pd.concat([first_mwu, second_mwu], axis=0).reset_index(drop=True)
     
@@ -72,12 +74,15 @@ class Fetcher():
 
     def get_score(self, ngram, weights=default_weights):
         this_measure = self.get_measures(ngram, normalized=True)
-        weighted = self.weight_measures(this_measure, weights)
-        mwu_score = weighted.drop('ngram_length', axis=1).sum(axis=1, numeric_only=True)
-        if len(mwu_score) == 1:
-            return mwu_score.iloc[0]
+        if this_measure is not None:
+            weighted = self.weight_measures(this_measure, weights)
+            mwu_score = weighted.drop('ngram_length', axis=1).sum(axis=1, numeric_only=True)
+            if len(mwu_score) == 1:
+                return mwu_score.iloc[0]
+            else:
+                return tuple(mwu_score)
         else:
-            return tuple(mwu_score)
+            return None
 
     def get_measures_batch(self, ngrams, normalized=True):
         bigrams = []
@@ -106,4 +111,5 @@ class Fetcher():
         weighted = self.weight_measures(this_measure, weights)
         mwu_score = weighted.drop('ngram_length', axis=1).sum(axis=1, numeric_only=True)
         weighted['mwu_score'] = mwu_score
-        return weighted[['comp_1', 'comp_2', 'mwu_score', 'ngram_length']]
+        weighted['ngram'] = weighted['comp_1'] + ' ' + weighted['comp_2']
+        return weighted[['ngram', 'comp_1', 'comp_2', 'mwu_score', 'ngram_length']]

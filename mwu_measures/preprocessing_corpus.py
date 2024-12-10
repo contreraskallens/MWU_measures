@@ -25,9 +25,10 @@ def clean_bnc_lines(raw_lines):
     y = y.str.replace('-', '')
     y = y.str.replace(r'\s\d+\s|^\d+\s|\s\d+$', ' NUMBER ', regex=True)
     y = y.str.strip()
-    y = y.str.replace(r'\s\W+\s|\s\W+|^\W\s$|\s+', ' ', regex=True)
+    y = y.str.replace(r'\s*\W+\s*', ' ', regex=True)
     y = y.str.strip()
-    y = 'START' + y + 'END'
+    y = y.str.replace(r'\s+', ' ', regex=True)
+    y = 'START ' + y + ' END'
     return list(zip(corpus_list, y.to_list()))
 
 def make_bigram_dict():

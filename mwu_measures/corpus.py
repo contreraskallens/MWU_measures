@@ -21,7 +21,7 @@ class Corpus():
                 ug TEXT,
                 freq INTEGER
                 )
-        """)
+        """)            
 
     def __call__(self, query):
         return(self.conn.execute(query))
@@ -785,3 +785,19 @@ class Corpus():
         USING (ngram_length)
     """
     )
+
+    def get_ngram_scores(self, source, target, length, entropy_limits=[-0.1, 0.1]):
+        self.make_token_freq(source, target)
+        self.reduce_query(source, target)
+        self.make_type_freq(source, target)
+        self.make_dispersion(source, target)
+        self.make_associations(source, target)
+        self.make_entropy_diffs(source, target)
+        self.join_measures(source, target, length)
+        self.normalize_measures(source, target, entropy_limits)
+        raw_measures = self("SELECT * FROM raw_measures").fetch_df()
+        normalized_measures = self("SELECT * FROM normalized_measures").fetch_df()
+        return {
+            'raw': raw_measures,
+            'normalized': normalized_measures,
+        }
