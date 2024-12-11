@@ -163,7 +163,6 @@ cython_debug/
 bnc_tokenized.txt
 small_corpus.txt
 small_corpus.txt
-mwu_measures/corpora/test_corpus.txt
-small_corpus.txt
+mwu_measures/corpora/coca_texts
 small_corpus.txt
 /.tmp

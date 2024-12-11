@@ -7,6 +7,7 @@ from . import preprocessing_corpus
 from .corpus import Corpus
 import pandas as pd
 from nltk import everygrams
+import os
 
 def process_text(text, line_sep='\n'):
     text = text.split(line_sep)
@@ -55,11 +56,34 @@ def get_processed_corpus(
                 raw_lines = corpus_file.readlines(chunk_size)
                 if not raw_lines:
                     break
-                ngram_dicts = preprocessing_corpus.preprocess_bnc(raw_lines)
+                ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=raw_lines, corpus='bnc')
                 this_corpus.add_chunk(ngram_dicts)
                 if verbose:
                     i += len(raw_lines)
                     print(f'{i} lines processed')
+    elif corpus_name == 'coca' and corpus_dir:
+        this_corpus = Corpus(corpus_name)
+        coca_texts = sorted(os.listdir(corpus_dir))
+        corpus_ids = dict(zip(sorted(coca_texts), range(len(coca_texts))))
+        coca_chunks = [coca_texts[i:i+chunk_size] for i in range(0, len(coca_texts), chunk_size)]
+        i = 0
+        for coca_chunk in coca_chunks:
+            print(coca_chunk)
+            lines_chunk = []
+            ids_chunk = []
+            for coca_text in coca_chunk:
+                with open(os.path.join(corpus_dir, coca_text)) as corpus_file:
+                    raw_lines = corpus_file.readlines()
+                    lines_chunk.extend(raw_lines)
+                    ids_chunk.extend([corpus_ids[coca_text]] * len(raw_lines))
+            print(len(lines_chunk))
+            
+            ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=lines_chunk, corpus='coca', corpus_ids=ids_chunk)
+            this_corpus.add_chunk(ngram_dicts)
+            if verbose:
+                i += len(lines_chunk)
+                print(f'{i} texts processed')            
+
     if test_corpus:
         this_corpus = Corpus('test')
         ngram_dicts = preprocessing_corpus.preprocess_test()
