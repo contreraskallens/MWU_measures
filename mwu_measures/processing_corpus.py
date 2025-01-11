@@ -8,6 +8,12 @@ from .corpus import Corpus
 import pandas as pd
 from nltk import everygrams
 import os
+import re
+from line_profiler import LineProfiler
+from itertools import groupby
+
+lp = LineProfiler()
+
 
 def process_text(text, line_sep='\n'):
     text = text.split(line_sep)
@@ -23,12 +29,13 @@ def process_text(text, line_sep='\n'):
     text = [ngram for line in text.to_list() for ngram in line]
     return text
 
-def get_processed_corpus(
+def make_processed_corpus(
         corpus_name='bnc',
         corpus_dir=None,
         verbose=False,
         test_corpus=False,
-        chunk_size = 1000000
+        chunk_size = 1000000,
+        threshold = 2
         ):
     """
     Takes preprocessed corpus and outputs the data structures necessary to compute MWU measures.
@@ -61,34 +68,35 @@ def get_processed_corpus(
                 if verbose:
                     i += len(raw_lines)
                     print(f'{i} lines processed')
-    elif corpus_name == 'coca' and corpus_dir:
+    elif (corpus_name == 'coca' or corpus_name == 'coca_sample') and corpus_dir:
         this_corpus = Corpus(corpus_name)
         coca_texts = sorted(os.listdir(corpus_dir))
-        corpus_ids = dict(zip(sorted(coca_texts), range(len(coca_texts))))
-        coca_chunks = [coca_texts[i:i+chunk_size] for i in range(0, len(coca_texts), chunk_size)]
-        i = 0
-        for coca_chunk in coca_chunks:
-            print(coca_chunk)
-            lines_chunk = []
-            ids_chunk = []
-            for coca_text in coca_chunk:
-                with open(os.path.join(corpus_dir, coca_text)) as corpus_file:
-                    raw_lines = corpus_file.readlines()
-                    lines_chunk.extend(raw_lines)
-                    ids_chunk.extend([corpus_ids[coca_text]] * len(raw_lines))
-            print(len(lines_chunk))
-            
-            ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=lines_chunk, corpus='coca', corpus_ids=ids_chunk)
-            this_corpus.add_chunk(ngram_dicts)
-            if verbose:
-                i += len(lines_chunk)
-                print(f'{i} texts processed')            
-
+        coca_cats = [re.search(r'_.+_', text_name, re.IGNORECASE).group(0) for text_name in coca_texts]
+        coca_cats = list(set(coca_cats))
+        corpus_ids = dict(zip(sorted(coca_cats), range(len(coca_cats))))
+        coca_text_cats = groupby(coca_texts, lambda x: re.search(r'_.+_', x, re.IGNORECASE).group(0))
+        coca_text_cats = [(cat_name, list(cat_chunk)) for cat_name, cat_chunk in coca_text_cats]
+        for cat_name, cat_chunk in coca_text_cats:
+            text_chunks = [cat_chunk[i:i+chunk_size] for i in range(0, len(cat_chunk), chunk_size)]
+            for chunk in text_chunks:
+                print(chunk)
+                chunk_text = ''
+                chunk_cat = corpus_ids[cat_name]
+                for coca_text in chunk:
+                    with open(os.path.join(corpus_dir, coca_text)) as corpus_file:
+                        raw_lines = corpus_file.read()
+                    chunk_text = chunk_text + ' \n ' + raw_lines
+                ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=chunk_text, corpus='coca', corpus_ids=int(chunk_cat))
+                this_corpus.add_chunk(ngram_dicts)
+                print('adding...')
     if test_corpus:
         this_corpus = Corpus('test')
         ngram_dicts = preprocessing_corpus.preprocess_test()
+        print(ngram_dicts)
         this_corpus.add_chunk(ngram_dicts)
-
-    this_corpus.consolidate_corpus()
+    print('Done adding to DB. Consolidating...')
+    this_corpus.consolidate_corpus(threshold=threshold)
+    print('Done consolidating. Creating totals...')
     this_corpus.create_totals()    
+    print('Done creating totals. Corpus allocated and ready for use.')
     return this_corpus

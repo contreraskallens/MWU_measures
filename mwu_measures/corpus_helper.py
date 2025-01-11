@@ -1,19 +1,21 @@
 import pandas as pd
-import re
-from nltk import everygrams
+from .corpus import Corpus
+import duckdb
 default_weights = {'token_freq': 1/8, 'dispersion': 1/8, 'type_1': 1/8, 'type_2': 1/8, 'entropy_1': 1/8, 'entropy_2': 1/8, 'fw_assoc': 1/8, 'bw_assoc': 1/8}
 
 
 class Fetcher():
     def __init__(self, corpus):
-        self.conn = corpus.conn
         self.corpus = corpus
-
-    def __call__(self, query):
-        return(self.conn.execute(query))
+        
+    def __call__(self, query, df = True):
+        if df:
+            return(self.corpus.df(query))
+        else:
+            return(self.corpus(query))
 
     def query(self, query):
-        self.conn.execute(query)
+        self.corpus(query)
 
     def query_corpus(self, ngrams, source, target):
         self.corpus.create_query(ngrams, source, target)
@@ -30,6 +32,8 @@ class Fetcher():
             elif len(split_ngram) == 3:
                 bigrams.append((split_ngram[0], split_ngram[1]))
                 trigrams.append((' '.join((split_ngram[0], split_ngram[1])), split_ngram[2]))
+            else:
+                print(split_ngram)
         bigrams = [list(bigram) for bigram in set(bigrams)]
         trigrams = [list(trigram) for trigram in set(trigrams)]
         self.query_corpus(bigrams, 'ug_1', 'ug_2')
@@ -84,7 +88,7 @@ class Fetcher():
         else:
             return None
 
-    def get_measures_batch(self, ngrams, normalized=True):
+    def get_measures_batch(self, ngrams, normalized=True, from_text=False):
         bigrams = []
         trigrams = []
         for ngram in ngrams:
@@ -92,7 +96,8 @@ class Fetcher():
             if len(split_ngram) == 2:
                 bigrams.append((split_ngram[0], split_ngram[1]))
             elif len(split_ngram) == 3:
-                bigrams.append((split_ngram[0], split_ngram[1]))
+                if not from_text:
+                    bigrams.append((split_ngram[0], split_ngram[1]))
                 trigrams.append((' '.join((split_ngram[0], split_ngram[1])), split_ngram[2]))
         bigrams = pd.DataFrame(bigrams, columns=['ug_1', 'ug_2'])
         trigrams = pd.DataFrame(trigrams, columns=['big_1', 'ug_3'])
@@ -106,10 +111,11 @@ class Fetcher():
         trigram_scores = trigram_scores.rename(columns={'big_1': 'comp_1', 'ug_3' : 'comp_2'})
         return pd.concat([bigram_scores, trigram_scores], axis=0).reset_index(drop=True)
 
-    def get_score_batch(self, ngrams, weights = default_weights):
-        this_measure = self.get_measures_batch(ngrams, normalized=True)
+    def get_score_batch(self, ngrams, weights = default_weights, from_text=False):
+        self.create_scores(ngrams)
+        this_measure = self.get_measures_batch(ngrams, normalized=True, from_text=from_text)
         weighted = self.weight_measures(this_measure, weights)
         mwu_score = weighted.drop('ngram_length', axis=1).sum(axis=1, numeric_only=True)
         weighted['mwu_score'] = mwu_score
         weighted['ngram'] = weighted['comp_1'] + ' ' + weighted['comp_2']
-        return weighted[['ngram', 'comp_1', 'comp_2', 'mwu_score', 'ngram_length']]
+        return (weighted[['ngram', 'comp_1', 'comp_2', 'mwu_score', 'ngram_length']], this_measure)

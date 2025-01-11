@@ -166,3 +166,6 @@ small_corpus.txt
 mwu_measures/corpora/coca_texts
 small_corpus.txt
 /.tmp
+mwu_measures/db/coca.db
+/mwu_measures/corpora/coca_sample
+mwu_measures/db/coca_sample.db
