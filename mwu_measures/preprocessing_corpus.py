@@ -6,71 +6,103 @@ Here I provided procedures to preprocess a couple of common corpora.
 Anything other than that should be included by user.
 """
 
-import re
-from collections import defaultdict
-from itertools import groupby
-from nltk import FreqDist, flatten
-from nltk.util import bigrams as get_bigrams
+from collections import defaultdict, Counter
+from itertools import groupby, islice, tee
+from nltk.util import trigrams as get_trigrams
+import pandas as pd
+import regex
+import numpy as np
+import pandas as pd
 
-
-def clean_bnc_line(this_line):
+def clean_bnc_lines(raw_lines):
     """
-    Takes a line from the tokenized BNC corpus and returns a list of cleaned tokens.
+    Takes a line from the tokenized BNC corpus and returns a list of cleaned lines
     """
-    this_line = re.sub(r'^.+\t', '', this_line).lower()
-    this_line = re.sub(r" (n't|'s|'ll|'d|'re|'ve|'m)", r'\1', this_line)
-    this_line = this_line.replace('wan na', 'wanna')
-    this_line = this_line.replace('\n', '')
-    this_line = this_line.replace('-', '')
-    # Get rid of standalone punctuation and double (and more) spaces
-    this_line = re.sub(r'\s\d+\s|^\d+\s|\s\d+$', ' NUMBER ', this_line).strip()
-    this_line = re.sub(r'\s\W+\s|\s\W+|^\W\s$|\s+', ' ', this_line).strip()
-    this_line = this_line.split()
-    return this_line
+    raw_lines = pd.Series(raw_lines)
+    corpus_list = raw_lines.str.extract(r'(^.)', expand=False)
+    processed_lines = raw_lines.str.replace(r'^.+\t', '', regex=True)
+    processed_lines = processed_lines.str.lower()
+    processed_lines = processed_lines.str.replace(r" (n't|'s|'ll|'d|'re|'ve|'m)", r"\1", regex=True)
+    processed_lines = processed_lines.str.replace('wan na', 'wanna', regex = False)
+    processed_lines = processed_lines.str.replace('\n', '')
+    processed_lines = processed_lines.str.replace('-', '')
+    processed_lines = processed_lines.str.replace(r'\s\d+\s|^\d+\s|\s\d+$', ' NUMBER ', regex=True)
+    processed_lines = processed_lines.str.strip()
+    processed_lines = processed_lines.str.replace(r'\s*\W+\s*', ' ', regex=True)
+    processed_lines = processed_lines.str.strip()
+    processed_lines = processed_lines.str.replace(r'\s+', ' ', regex=True)
+    processed_lines = 'START ' + processed_lines + ' END'
+    return list(zip(corpus_list, processed_lines.to_list()))
 
-def preprocess_bnc(bnc_dir, chunk_size = 10000, verbose = False):
-    """
-    Processes the bnc_tokenized.txt file from the BNC corpus 
-    to prepare for extracting distributions.
-    Not normally used by itself but called from process_corpus.
-    :param bnc_dir: The directory of the bnc_tokenized.txt file.
-    :param chunk_size: The size (in bytes) of the file to be preprocessed at once.
-        Larger numbers use more memory but are faster unless they fill RAM.
-    :param verbose: Whether to print progress reports on preprocessing.
-    :returns: Tuple with dictionaries for processing. First is the unigrams,
-        second is the bigrams.
-        The format of each dictionary is {Corpus: nltk.FreqDist} with frequency
-        of each element within that corpus.
-    """
-    #for BNC, you want to provide the bnc_tokenized.txt file
-    if verbose:
-        print('Reading and cleaning corpus...')
-    unigram_freqs = defaultdict(FreqDist)
-    bigram_freqs = defaultdict(FreqDist)
-    with open(bnc_dir, 'r', encoding="utf-8") as corpus_file:
-        i = 0
-        while True:
-            raw_lines = corpus_file.readlines(chunk_size)
-            if not raw_lines:
-                break
-            org_items = groupby(raw_lines, key=lambda x: re.match(r'(^.)', x).group(1))
-            unigrams = {
-                key:[clean_bnc_line(line) for line in group] for key, group in org_items
-                }
-            bigrams = {
-                key:[bigram for line in group for bigram in get_bigrams(line) if len(line) > 1]
-                for key, group in unigrams.items()
-                }
-            unigrams = {key: flatten(group) for key, group in unigrams.items()}
-            for corpus, unigrams in unigrams.items():
-                this_dist = FreqDist(unigrams)
-                unigram_freqs[corpus].update(this_dist)
-            for corpus, bigrams in bigrams.items():
-                this_dist = FreqDist(bigrams)
-                bigram_freqs[corpus].update(this_dist)
+def clean_coca_lines_regex(raw_lines, corpus_ids):
+    processed_lines = regex.sub(r' [\.\?\!] |\n|(@ )+|</*[ph]>|<br>', ' splitmehere ', raw_lines.lower())
+    processed_lines = regex.sub(r" (n't|'s|'ll|'d|'re|'ve|'m)", r"\1", processed_lines)
+    processed_lines = regex.sub(r'@@\d+\s*', r"", processed_lines)
+    processed_lines = processed_lines.replace('wan na', 'wanna')
+    processed_lines = processed_lines.replace('-', ' ')
+    processed_lines = regex.sub(r'\d+', ' NUMBER ', processed_lines)
+    processed_lines = regex.sub(r' \W|\W ', ' ', processed_lines)
+    processed_lines = processed_lines.split(' splitmehere ')
+    # Might get some mileage out of converting to Series, doing vectorized, and then converting back to list.
+    # Get rid of double spaces and trailing spaces, add header and footer in line
+    processed_lines = ['START ' + ' '.join(line.split()).strip() + ' END' for line in processed_lines if len(line) > 0]
+    processed_lines = (corpus_ids, ' '.join(processed_lines))
+    return [processed_lines]
+    # return list(zip([corpus_ids] * len(processed_lines), processed_lines))
 
-            if verbose:
-                i += len(raw_lines)
-                print(f'{i} lines processed')
+def make_bigram_dict():
+    this_dict = defaultdict(Counter)
+    return this_dict
 
-    return (unigram_freqs, bigram_freqs)
+def generate_trigrams(text):
+    words = text.split()
+    return list(zip(words, islice(words, 1, None), islice(words, 2, None)))
+
+def pairwise(iterable, n=2):
+    return zip(*(islice(it, pos, None) for pos, it in enumerate(tee(iterable, n))))
+
+def zipngram2(text, n=2):
+    words = text.split()
+    return pairwise(words, n)
+
+def preprocess_test():
+    with open('mwu_measures/corpora/test_corpus.txt', 'r', encoding="utf-8") as corpus_file:
+        raw_lines = corpus_file.read().splitlines()
+    split_lines = [line.split() for line in raw_lines]
+    trigrams = [Counter(get_trigrams(line)) for line in split_lines]
+    corpora = ['A', 'B', 'C']
+    trigrams = [(corpus, trigram[0], trigram[1], trigram[2], freq) for corpus, corpus_dict in zip(corpora, trigrams) for trigram, freq in corpus_dict.items()]
+    unigrams = [Counter(unigrams) for unigrams in split_lines]
+    unigrams = [(corpus, unigram, freq) for corpus, corpus_dict in zip(corpora, unigrams) for unigram, freq in corpus_dict.items()]
+    return unigrams, trigrams
+
+def preprocess_corpus(raw_lines, corpus, corpus_ids=None):
+    # corpus_id is for CoCA
+    # for BNC, you want to provide the bnc_tokenized.txt file
+    # for coca, folder with texts
+    if corpus == 'bnc':
+        this_lines = clean_bnc_lines(raw_lines)
+    elif corpus == 'coca' or corpus == 'coca_sample':
+        print('cleaning...')
+        this_lines = clean_coca_lines_regex(raw_lines, corpus_ids)
+    print('extracting trigrams...')
+    all_trigrams = {key: zipngram2(corpus, 3) for key, corpus in this_lines}
+    trigrams = {key: Counter(list(trigrams)) for key, trigrams in all_trigrams.items()}
+    # Can't find anything remotely faster than this
+    trigrams = [(corpus, *ngram, freq) for corpus, corpus_dict in trigrams.items() for ngram, freq in corpus_dict.items()]
+    unigrams = {corpus: Counter(corpus_lines.split()) for corpus, corpus_lines in this_lines}
+    unigrams = [(corpus, ngram, freq) for corpus, corpus_dict in unigrams.items() for ngram, freq in corpus_dict.items()]
+    return unigrams, trigrams
+
+
+
+    # org_items = groupby(this_lines, key=lambda x: x[0])
+    # print('extracting trigrams...')
+    # unigrams = {key:[line[1] for line in group] for key, group in org_items}
+    # # all_trigrams = {key: [' '.join(trigram) for line in group for trigram in list(generate_trigrams(line))] for key, group in unigrams.items()}
+    # all_trigrams = {key: [' '.join(trigram) for line in group for trigram in zipngram2(line, 3)] for key, group in unigrams.items()}
+    # trigrams = {key: Counter(trigrams) for key, trigrams in all_trigrams.items()}    
+    # # trigrams =  {key: dict(zip(*np.unique(trigrams, return_counts=True))) for key, trigrams in all_trigrams.items()}
+    # trigrams = [(corpus, ngram, freq) for corpus, corpus_dict in trigrams.items() for ngram, freq in corpus_dict.items()]
+    # unigrams = {corpus: Counter([unigram for line in corpus_lines for unigram in line.split()]) for corpus, corpus_lines in unigrams.items()}
+    # unigrams = [(corpus, ngram, freq) for corpus, corpus_dict in unigrams.items() for ngram, freq in corpus_dict.items()]

@@ -3,38 +3,40 @@ This module takes a preprocessed corpus and builds the frequency
 data structures needed to extract the MWU variables.
 """
 
-from collections import defaultdict
-import numpy as np
-import pandas as pd
-from nltk import FreqDist, bigrams
 from . import preprocessing_corpus
+from .corpus import Corpus
+import pandas as pd
+from nltk import everygrams
+import os
+import re
+from line_profiler import LineProfiler
+from itertools import groupby
 
-BIGRAM_PER_CORPUS = None
-CORPUS_PROPORTIONS = None
-UNIGRAM_FREQUENCIES_PC = None
-UNIGRAM_TOTAL = None
-BIGRAM_FW = None
-BIGRAM_BW = None
-
-def get_corpus_props(unigram_freqs_pc):
-    """
-    Gets the proportion of the total unigrams that each corpus has. 
-    Necessary for obtaining dispersion measure.
-    """
-    corpus_sizes = {corpus: dist.total() for corpus, dist in unigram_freqs_pc.items()}
-    corpus_total = np.sum(list(corpus_sizes.values()))
-    corpus_props = [(corpus, size / corpus_total) for corpus, size in corpus_sizes.items()]
-    corpus_props = pd.DataFrame(corpus_props, columns=['corpus', 'corpus_prop'])
-    return corpus_props
+lp = LineProfiler()
 
 
-def process_corpus(
-    corpus='bnc',
-    corpus_dir=None,
-    verbose=False,
-    test_corpus=False,
-    chunk_size = 10000
-    ):
+def process_text(text, line_sep='\n'):
+    text = text.split(line_sep)
+    text = pd.Series(text)
+    text = text.str.lower()
+    text = text.str.replace('\n', '')
+    text = text.str.replace('-', '')
+    text = text.str.replace(r'\s\d+\s|^\d+\s|\s\d+$', ' NUMBER ', regex=True)
+    text = text.str.strip()
+    text = text.str.replace(r'\s*\W\s*', ' ', regex=True)
+    text = text.str.replace(r'\s+', ' ', regex=True)
+    text = text.apply(lambda line: [' '.join(ngram) for ngram in everygrams(line.split(), 2, 3)])
+    text = [ngram for line in text.to_list() for ngram in line]
+    return text
+
+def make_processed_corpus(
+        corpus_name='bnc',
+        corpus_dir=None,
+        verbose=False,
+        test_corpus=False,
+        chunk_size = 1000000,
+        threshold = 2
+        ):
     """
     Takes preprocessed corpus and outputs the data structures necessary to compute MWU measures.
     The data obtained are frequencies for unigrams and bigrams, 
@@ -53,51 +55,48 @@ def process_corpus(
         UNIGRAM_FREQUENCIES_PC, BIGRAM_PER_CORPUS, UNIGRAM_TOTAL,
         BIGRAM_FW, BIGRAM_BW, CORPUS_PROPORTIONS
     """
-    # TODO: consider making it return something and not use global scope variables.
-
-    global UNIGRAM_FREQUENCIES_PC
-    global BIGRAM_PER_CORPUS
-    global UNIGRAM_TOTAL
-    global BIGRAM_FW
-    global BIGRAM_BW
-    global CORPUS_PROPORTIONS
-
-    # TODO: should make brown the default corpus because it's included in nltk
-
-    if verbose:
-        print('Preprocessing the corpus')
-    if corpus == 'bnc' and corpus_dir:
-        UNIGRAM_FREQUENCIES_PC, BIGRAM_PER_CORPUS = preprocessing_corpus.preprocess_bnc(
-            corpus_dir,
-            chunk_size=chunk_size,
-            verbose=verbose
-            )
+    if corpus_name == 'bnc' and corpus_dir:
+        this_corpus = Corpus(corpus_name)
+        with open(corpus_dir, 'r', encoding="utf-8") as corpus_file:
+            i = 0
+            while True:
+                raw_lines = corpus_file.readlines(chunk_size)
+                if not raw_lines:
+                    break
+                ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=raw_lines, corpus='bnc')
+                this_corpus.add_chunk(ngram_dicts)
+                if verbose:
+                    i += len(raw_lines)
+                    print(f'{i} lines processed')
+    elif (corpus_name == 'coca' or corpus_name == 'coca_sample') and corpus_dir:
+        this_corpus = Corpus(corpus_name)
+        coca_texts = sorted(os.listdir(corpus_dir))
+        coca_cats = [re.search(r'_.+_', text_name, re.IGNORECASE).group(0) for text_name in coca_texts]
+        coca_cats = list(set(coca_cats))
+        corpus_ids = dict(zip(sorted(coca_cats), range(len(coca_cats))))
+        coca_text_cats = groupby(coca_texts, lambda x: re.search(r'_.+_', x, re.IGNORECASE).group(0))
+        coca_text_cats = [(cat_name, list(cat_chunk)) for cat_name, cat_chunk in coca_text_cats]
+        for cat_name, cat_chunk in coca_text_cats:
+            text_chunks = [cat_chunk[i:i+chunk_size] for i in range(0, len(cat_chunk), chunk_size)]
+            for chunk in text_chunks:
+                print(chunk)
+                chunk_text = ''
+                chunk_cat = corpus_ids[cat_name]
+                for coca_text in chunk:
+                    with open(os.path.join(corpus_dir, coca_text)) as corpus_file:
+                        raw_lines = corpus_file.read()
+                    chunk_text = chunk_text + ' \n ' + raw_lines
+                ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=chunk_text, corpus='coca', corpus_ids=int(chunk_cat))
+                this_corpus.add_chunk(ngram_dicts)
+                print('adding...')
     if test_corpus:
-        corpus_a = 'a d c b e b f g h c b i j k a y z b n o a c c b p q r q a x r z n a'.split()
-        corpus_b = 'y i b c p x e j d g n k q r b x x c b d y z f o p q b d j e z b d'.split()
-        corpus_c = 'g g i o r j j b c d g j k r e j g f h k h f d h k o a c b r d g k b'.split()
-
-        UNIGRAM_FREQUENCIES_PC = {
-            'A': FreqDist(corpus_a),
-            'B': FreqDist(corpus_b),
-            'C': FreqDist(corpus_c)
-            }
-        BIGRAM_PER_CORPUS = {
-            'A': FreqDist(bigrams(corpus_a)),
-            'B': FreqDist(bigrams(corpus_b)),
-            'C': FreqDist(bigrams(corpus_c))
-            }
-    #else: brown corpus
-
-    if verbose:
-        print('Getting everything ready for score extraction')
-
-    UNIGRAM_TOTAL = sum(UNIGRAM_FREQUENCIES_PC.values(), FreqDist())
-
-    BIGRAM_FW = defaultdict(lambda: defaultdict(FreqDist))
-    BIGRAM_BW = defaultdict(lambda: defaultdict(FreqDist))
-    for this_corpus, corpus_dict in BIGRAM_PER_CORPUS.items():
-        for bigram, freq in corpus_dict.items():
-            BIGRAM_FW[this_corpus][bigram[0]][bigram[1]] = freq
-            BIGRAM_BW[this_corpus][bigram[1]][bigram[0]] = freq
-    CORPUS_PROPORTIONS = get_corpus_props(UNIGRAM_FREQUENCIES_PC)
+        this_corpus = Corpus('test')
+        ngram_dicts = preprocessing_corpus.preprocess_test()
+        print(ngram_dicts)
+        this_corpus.add_chunk(ngram_dicts)
+    print('Done adding to DB. Consolidating...')
+    this_corpus.consolidate_corpus(threshold=threshold)
+    print('Done consolidating. Creating totals...')
+    this_corpus.create_totals()    
+    print('Done creating totals. Corpus allocated and ready for use.')
+    return this_corpus

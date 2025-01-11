@@ -1,10 +1,10 @@
 """
 Main loading
 """
-from .processing_corpus import process_corpus
-from .mwu_functions import get_mwu_scores
+from .processing_corpus import make_processed_corpus
+from .processing_corpus import process_text
 
 __all__ = [
-    'process_corpus',
-    'get_mwu_scores',
+    'make_processed_corpus',
+    'process_text'
 ]
