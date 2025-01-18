@@ -12,10 +12,7 @@ import re
 from line_profiler import LineProfiler
 from itertools import groupby
 
-lp = LineProfiler()
-
-
-def process_text(text, line_sep='\n', include_last=True):
+def process_text(text, line_sep='\n'):
     text = text.split(line_sep)
     text = pd.Series(text)
     text = text.str.lower()
@@ -26,10 +23,7 @@ def process_text(text, line_sep='\n', include_last=True):
     text = text.str.replace(r'\s*\W\s*', ' ', regex=True)
     text = text.str.replace(r'\s+', ' ', regex=True)
     text = text.apply(lambda line: [' '.join(ngram) for ngram in everygrams(line.split(), 2, 3)])
-    if include_last:
-        text = [ngram for line in text.to_list() for ngram in line]
-    else: 
-        text = [ngram for line in text.to_list() for ngram in line][0:-1]
+    text = [ngram for line in text.to_list() for ngram in line]
     return text
 
 def make_processed_corpus(
@@ -38,7 +32,8 @@ def make_processed_corpus(
         verbose=False,
         test_corpus=False,
         chunk_size = 1000000,
-        threshold = 2
+        threshold = 0
+
         ):
     """
     Takes preprocessed corpus and outputs the data structures necessary to compute MWU measures.
