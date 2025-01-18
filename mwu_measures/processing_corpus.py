@@ -12,9 +12,6 @@ import re
 from line_profiler import LineProfiler
 from itertools import groupby
 
-lp = LineProfiler()
-
-
 def process_text(text, line_sep='\n'):
     text = text.split(line_sep)
     text = pd.Series(text)
@@ -36,6 +33,7 @@ def make_processed_corpus(
         test_corpus=False,
         chunk_size = 1000000,
         threshold = 0
+
         ):
     """
     Takes preprocessed corpus and outputs the data structures necessary to compute MWU measures.

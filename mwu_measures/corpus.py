@@ -87,9 +87,9 @@ class Corpus():
                 """
                 INSERT INTO unigram_db_temp
                 SELECT * from chunk_unigrams
-            """)
+            """)          
 
-    def consolidate_corpus(self, threshold=0):
+    def consolidate_corpus(self, threshold=2):
         with duckdb.connect(self.path) as conn:
             # conn.execute("""CREATE OR REPLACE TABLE trigram_db_temp AS""")
             all_corpora = conn.execute("SELECT DISTINCT corpus FROM trigram_db_temp").fetchall()
@@ -889,7 +889,6 @@ class Corpus():
             conn.execute("DROP TABLE query_ref")
             conn.execute("VACUUM ANALYZE")
 
-
     def normalize_measures(self, source, target):
         with duckdb.connect(self.path) as conn:
             conn.execute(
@@ -918,6 +917,9 @@ class Corpus():
                 )
 
             conn.execute(
+    def normalize_measures(self, source, target, entropy_limits=[-0.1, 0.1]):
+        with duckdb.connect(self.path) as conn:
+            conn.execute(
                 f"""
                 CREATE OR REPLACE TEMPORARY TABLE normalized_measures_temp AS
                 SELECT
@@ -943,7 +945,6 @@ class Corpus():
                 FROM normalized_measures_temp
         """)
 
-
     def get_ngram_scores(self, source, target, length, entropy_limits=[-0.1, 0.1]):
         with Progress(
             TextColumn("[bold blue]{task.fields[task_name]}\n[bold blue]{task.description}", justify="left"),
@@ -966,6 +967,7 @@ class Corpus():
             self.join_measures(source, target, length)
             progress.update(compute_mwus, advance=1, description="Normalizing...")
             self.normalize_measures(source, target)
+
             progress.update(compute_mwus, advance=1, description="Cleaning up...")
             raw_measures = self.df("SELECT * FROM raw_measures")
             normalized_measures = self.df("SELECT * FROM normalized_measures")

@@ -109,7 +109,6 @@ class Fetcher():
         bigram_scores = bigram_scores.rename(columns={'ug_1': 'comp_1', 'ug_2': 'comp_2'})
         trigram_scores = trigram_scores.rename(columns={'big_1': 'comp_1', 'ug_3' : 'comp_2'})
         return pd.concat([bigram_scores, trigram_scores], axis=0).reset_index(drop=True)
-
     def get_score_batch(self, ngrams, weights = default_weights, from_text=False, normalized=True):
         self.create_scores(ngrams)
         this_measure = self.get_measures_batch(ngrams, normalized=normalized, from_text=from_text)
