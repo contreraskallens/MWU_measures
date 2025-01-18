@@ -35,7 +35,7 @@ def make_processed_corpus(
         verbose=False,
         test_corpus=False,
         chunk_size = 1000000,
-        threshold = 2
+        threshold = 0
         ):
     """
     Takes preprocessed corpus and outputs the data structures necessary to compute MWU measures.

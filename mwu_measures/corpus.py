@@ -79,44 +79,17 @@ class Corpus():
                 )
             """)
             conn.execute(
-                f"""
+                """
                 INSERT INTO trigram_db_temp
                 SELECT * from chunk_trigrams
             """)
             conn.execute(
-                f"""
+                """
                 INSERT INTO unigram_db_temp
                 SELECT * from chunk_unigrams
             """)
-            # conn.execute("""
-            #     CREATE OR REPLACE TABLE trigram_db_temp AS (
-            #         SELECT
-            #             corpus,
-            #             ug_1,
-            #             ug_2,
-            #             ug_3,
-            #             big_1,
-            #             COALESCE(trigram_db_temp.freq, 0) + COALESCE(chunk_trigrams.freq, 0) AS freq,
-            #         FROM trigram_db_temp
-            #         FULL OUTER JOIN chunk_trigrams
-            #         USING(corpus, ug_1, ug_2, ug_3, big_1)
-            #     )
-            # """)
-            # conn.execute("""
-            #     CREATE OR REPLACE TABLE unigram_db_temp AS (
-            #         SELECT
-            #             corpus,
-            #             ug,
-            #             ug_hash,
-            #             COALESCE(unigram_db_temp.freq, 0) + COALESCE(chunk_unigrams.freq, 0) AS freq,
-            #         FROM unigram_db_temp
-            #         FULL OUTER JOIN chunk_unigrams
-            #         USING(corpus, ug, ug_hash)
-            #     )
-            # """)
-            # conn.execute("VACUUM ANALYZE")
 
-    def consolidate_corpus(self, threshold=2):
+    def consolidate_corpus(self, threshold=0):
         with duckdb.connect(self.path) as conn:
             # conn.execute("""CREATE OR REPLACE TABLE trigram_db_temp AS""")
             all_corpora = conn.execute("SELECT DISTINCT corpus FROM trigram_db_temp").fetchall()
@@ -916,33 +889,51 @@ class Corpus():
             conn.execute("DROP TABLE query_ref")
             conn.execute("VACUUM ANALYZE")
 
-    def normalize_measures(self, source, target, entropy_limits=[-0.1, 0.1]):
+
+    def normalize_measures(self, source, target):
         with duckdb.connect(self.path) as conn:
+            conn.execute(
+                """
+                CREATE OR REPLACE TEMPORARY TABLE min_max AS 
+                SELECT
+                    MIN(token_freq) AS min_tok,
+                    MAX(token_freq) AS max_tok,
+                    MIN(typef_1) AS min_type_1,
+                    MAX(typef_1) AS max_type_1,
+                    MIN(typef_2) AS min_type_2,
+                    MAX(typef_2) AS max_type_2,
+                    MIN(entropy_1) AS min_entropy_1,
+                    MAX(entropy_1) AS max_entropy_1,
+                    MIN(entropy_2) AS min_entropy_2,
+                    MAX(entropy_2) AS max_entropy_2,
+                    MIN(fw_assoc) AS min_fw_assoc,
+                    MAX(fw_assoc) AS max_fw_assoc,
+                    MIN(bw_assoc) AS min_bw_assoc,
+                    MAX(bw_assoc) AS max_bw_assoc,
+                    ngram_length
+                FROM raw_measures
+                WHERE NOT ISNAN(ngram_length)
+                GROUP BY ngram_length
+                """
+                )
+
             conn.execute(
                 f"""
                 CREATE OR REPLACE TEMPORARY TABLE normalized_measures_temp AS
                 SELECT
                     {source},
                     {target},
-                    (log(token_freq) - log(1)) / (log(ngram_totals.max_token) - log(1)) AS token_freq,
+                    (LOG(token_freq) - LOG(min_max.min_tok)) / (LOG(min_max.max_tok) - LOG(min_max.min_tok)) AS token_freq,
                     1 - dispersion AS dispersion,
-                    (log(typef_1) - log(1)) / (log(ngram_totals.max_type1) - log(1)) AS type_1,
-                    (log(typef_2) - log(1)) / (log(ngram_totals.max_type2) - log(1)) AS type_2,
-                CASE
-                    WHEN entropy_1 < {entropy_limits[0]} THEN 0
-                    WHEN entropy_1 > {entropy_limits[1]} THEN 1
-                    ELSE (entropy_1 - {entropy_limits[0]}) / ({entropy_limits[1]} - {entropy_limits[0]})
-                END AS entropy_1,
-                CASE
-                    WHEN entropy_2 < {entropy_limits[0]} THEN 0
-                    WHEN entropy_2 > {entropy_limits[1]} THEN 1
-                    ELSE (entropy_2 - {entropy_limits[0]}) / ({entropy_limits[1]} - {entropy_limits[0]})
-                END AS entropy_2,
-                fw_assoc,
-                bw_assoc,
-                ngram_length
+                    1 - ((LOG(typef_1) - LOG(min_max.min_type_1)) / (LOG(min_max.max_type_1) / LOG(min_max.min_type_1))) AS type_1,
+                    1 - ((LOG(typef_2) - LOG(min_max.min_type_2)) / (LOG(min_max.max_type_2) / LOG(min_max.min_type_2))) AS type_2,
+                    (entropy_1 - min_max.min_entropy_1) / (min_max.max_entropy_1 - min_max.min_entropy_1) AS entropy_1,
+                    (entropy_2 - min_max.min_entropy_2) / (min_max.max_entropy_2 - min_max.min_entropy_2) AS entropy_2,
+                    (fw_assoc - min_max.min_fw_assoc) / (min_max.max_fw_assoc - min_max.min_fw_assoc) AS fw_assoc,
+                    (bw_assoc - min_max.min_bw_assoc) / (min_max.max_bw_assoc - min_max.min_bw_assoc) AS bw_assoc,
+                    ngram_length
             FROM raw_measures
-            LEFT JOIN ngram_totals
+            LEFT JOIN min_max
             USING (ngram_length)
         """)
             conn.execute(
@@ -952,8 +943,8 @@ class Corpus():
                 FROM normalized_measures_temp
         """)
 
+
     def get_ngram_scores(self, source, target, length, entropy_limits=[-0.1, 0.1]):
-        # console = Console(force_terminal=False, soft_wrap=True)
         with Progress(
             TextColumn("[bold blue]{task.fields[task_name]}\n[bold blue]{task.description}", justify="left"),
             MofNCompleteColumn(),
@@ -974,7 +965,7 @@ class Corpus():
             progress.update(compute_mwus, advance=1, description="Joining everything...")
             self.join_measures(source, target, length)
             progress.update(compute_mwus, advance=1, description="Normalizing...")
-            self.normalize_measures(source, target, entropy_limits)
+            self.normalize_measures(source, target)
             progress.update(compute_mwus, advance=1, description="Cleaning up...")
             raw_measures = self.df("SELECT * FROM raw_measures")
             normalized_measures = self.df("SELECT * FROM normalized_measures")

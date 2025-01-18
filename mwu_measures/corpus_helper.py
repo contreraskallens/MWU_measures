@@ -1,6 +1,4 @@
 import pandas as pd
-from .corpus import Corpus
-import duckdb
 default_weights = {'token_freq': 1/8, 'dispersion': 1/8, 'type_1': 1/8, 'type_2': 1/8, 'entropy_1': 1/8, 'entropy_2': 1/8, 'fw_assoc': 1/8, 'bw_assoc': 1/8}
 
 
@@ -20,7 +18,7 @@ class Fetcher():
     def query_corpus(self, ngrams, source, target):
         self.corpus.create_query(ngrams, source, target)
 
-    def create_scores(self, ngrams):
+    def create_scores(self, ngrams, from_text=False):
         ngrams = list(set(ngrams))
         bigrams = []
         trigrams = []
@@ -30,7 +28,8 @@ class Fetcher():
             if len(split_ngram) == 2:
                 bigrams.append(tuple(split_ngram))
             elif len(split_ngram) == 3:
-                bigrams.append((split_ngram[0], split_ngram[1]))
+                if not from_text:
+                    bigrams.append((split_ngram[0], split_ngram[1]))
                 trigrams.append((' '.join((split_ngram[0], split_ngram[1])), split_ngram[2]))
             else:
                 print(split_ngram)
@@ -111,9 +110,9 @@ class Fetcher():
         trigram_scores = trigram_scores.rename(columns={'big_1': 'comp_1', 'ug_3' : 'comp_2'})
         return pd.concat([bigram_scores, trigram_scores], axis=0).reset_index(drop=True)
 
-    def get_score_batch(self, ngrams, weights = default_weights, from_text=False):
+    def get_score_batch(self, ngrams, weights = default_weights, from_text=False, normalized=True):
         self.create_scores(ngrams)
-        this_measure = self.get_measures_batch(ngrams, normalized=True, from_text=from_text)
+        this_measure = self.get_measures_batch(ngrams, normalized=normalized, from_text=from_text)
         weighted = self.weight_measures(this_measure, weights)
         mwu_score = weighted.drop('ngram_length', axis=1).sum(axis=1, numeric_only=True)
         weighted['mwu_score'] = mwu_score
