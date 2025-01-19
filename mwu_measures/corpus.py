@@ -917,9 +917,6 @@ class Corpus():
                 )
 
             conn.execute(
-    def normalize_measures(self, source, target, entropy_limits=[-0.1, 0.1]):
-        with duckdb.connect(self.path) as conn:
-            conn.execute(
                 f"""
                 CREATE OR REPLACE TEMPORARY TABLE normalized_measures_temp AS
                 SELECT
@@ -975,6 +972,7 @@ class Corpus():
             self("DROP TABLE raw_measures")
             self("DROP TABLE normalized_measures")
             progress.update(compute_mwus, advance=1, description="Done!")
+
             return {
                 'raw': raw_measures,
                 'normalized': normalized_measures,

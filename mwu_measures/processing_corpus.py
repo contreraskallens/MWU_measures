@@ -9,21 +9,26 @@ import pandas as pd
 from nltk import everygrams
 import os
 import re
-from line_profiler import LineProfiler
 from itertools import groupby
 
-def process_text(text, line_sep='\n'):
+def process_text(text, line_sep='\n', include_last=True):
     text = text.split(line_sep)
     text = pd.Series(text)
     text = text.str.lower()
     text = text.str.replace('\n', '')
     text = text.str.replace('-', '')
-    text = text.str.replace(r'\s\d+\s|^\d+\s|\s\d+$', ' NUMBER ', regex=True)
+    text = text.str.replace(r'\d+', ' NUMBER ', regex=True)
     text = text.str.strip()
-    text = text.str.replace(r'\s*\W\s*', ' ', regex=True)
+    text = text.str.replace(r' +\W+', ' ', regex=True)
+    text = text.str.replace(r'\W+ +', ' ', regex=True)
+    text = text.str.replace(r'^\W+', ' ', regex=True)
+    text = text.str.replace(r'\W+$', ' ', regex=True)
+    text = text.str.replace(r'(\w)[\.,]+(\w)', r'\1 \2', regex=True)
     text = text.str.replace(r'\s+', ' ', regex=True)
     text = text.apply(lambda line: [' '.join(ngram) for ngram in everygrams(line.split(), 2, 3)])
     text = [ngram for line in text.to_list() for ngram in line]
+    if not include_last:
+        text = text[0:-1]
     return text
 
 def make_processed_corpus(
