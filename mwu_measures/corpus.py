@@ -100,6 +100,7 @@ class Corpus():
             all_corpora = conn.execute("SELECT DISTINCT corpus FROM trigram_db_temp").fetchall()
             all_corpora = ["'" + str(corpus_list[0]) + "'" for corpus_list in all_corpora]
             all_corpora = ", ".join(all_corpora)
+            print('Pivot')
             conn.execute(
                 f"""CREATE OR REPLACE TABLE trigram_db AS (
                     SELECT * 
@@ -110,6 +111,7 @@ class Corpus():
                     )
                 )
             """)
+            print('After pivot')
             conn.execute(
                 f"""CREATE OR REPLACE TABLE unigram_db AS (
                     SELECT * 
