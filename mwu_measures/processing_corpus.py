@@ -25,7 +25,7 @@ def process_text(text, line_sep='\n'):
     text = text.str.strip()
     text = text.str.replace(r'\s*\W\s*', ' ', regex=True)
     text = text.str.replace(r'\s+', ' ', regex=True)
-    text = text.apply(lambda line: [' '.join(ngram) for ngram in everygrams(line.split(), 2, 3)])
+    text = text.apply(lambda line: [' '.join(ngram) for ngram in everygrams(line.split(), 2, 4)])
     text = [ngram for line in text.to_list() for ngram in line]
     return text
 
@@ -68,7 +68,7 @@ def make_processed_corpus(
                 if verbose:
                     i += len(raw_lines)
                     print(f'{i} lines processed')
-    elif (corpus_name == 'coca' or corpus_name == 'coca_sample') and corpus_dir:
+    elif (corpus_name == 'coca' or corpus_name == 'coca_sample' or corpus_name == 'coca_fourgrams') and corpus_dir:
         this_corpus = Corpus(corpus_name)
         coca_texts = sorted(os.listdir(corpus_dir))
         coca_cats = [re.search(r'_.+_', text_name, re.IGNORECASE).group(0) for text_name in coca_texts]
@@ -92,11 +92,10 @@ def make_processed_corpus(
     if test_corpus:
         this_corpus = Corpus('test')
         ngram_dicts = preprocessing_corpus.preprocess_test()
-        print(ngram_dicts)
         this_corpus.add_chunk(ngram_dicts)
     print('Done adding to DB. Consolidating...')
     this_corpus.consolidate_corpus(threshold=threshold)
-    print('Done consolidating. Creating totals...')
+    # print('Done consolidating. Creating totals...')
     this_corpus.create_totals()    
     print('Done creating totals. Corpus allocated and ready for use.')
     return this_corpus

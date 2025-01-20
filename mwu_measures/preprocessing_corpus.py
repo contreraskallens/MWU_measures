@@ -9,6 +9,7 @@ Anything other than that should be included by user.
 from collections import defaultdict, Counter
 from itertools import groupby, islice, tee
 from nltk.util import trigrams as get_trigrams
+from nltk import ngrams
 import pandas as pd
 import regex
 import numpy as np
@@ -45,7 +46,7 @@ def clean_coca_lines_regex(raw_lines, corpus_ids):
     processed_lines = processed_lines.split(' splitmehere ')
     # Might get some mileage out of converting to Series, doing vectorized, and then converting back to list.
     # Get rid of double spaces and trailing spaces, add header and footer in line
-    processed_lines = ['START ' + ' '.join(line.split()).strip() + ' END' for line in processed_lines if len(line) > 0]
+    processed_lines = ['START START ' + ' '.join(line.split()).strip() + ' END END' for line in processed_lines if len(line) > 0]
     processed_lines = (corpus_ids, ' '.join(processed_lines))
     return [processed_lines]
     # return list(zip([corpus_ids] * len(processed_lines), processed_lines))
@@ -69,9 +70,10 @@ def preprocess_test():
     with open('mwu_measures/corpora/test_corpus.txt', 'r', encoding="utf-8") as corpus_file:
         raw_lines = corpus_file.read().splitlines()
     split_lines = [line.split() for line in raw_lines]
-    trigrams = [Counter(get_trigrams(line)) for line in split_lines]
+    trigrams = [Counter(zipngram2(line, 4)) for line in raw_lines]
+    print(trigrams)
     corpora = ['A', 'B', 'C']
-    trigrams = [(corpus, trigram[0], trigram[1], trigram[2], freq) for corpus, corpus_dict in zip(corpora, trigrams) for trigram, freq in corpus_dict.items()]
+    trigrams = [(corpus, trigram[0], trigram[1], trigram[2], trigram[3], freq) for corpus, corpus_dict in zip(corpora, trigrams) for trigram, freq in corpus_dict.items()]
     unigrams = [Counter(unigrams) for unigrams in split_lines]
     unigrams = [(corpus, unigram, freq) for corpus, corpus_dict in zip(corpora, unigrams) for unigram, freq in corpus_dict.items()]
     return unigrams, trigrams
@@ -86,7 +88,7 @@ def preprocess_corpus(raw_lines, corpus, corpus_ids=None):
         print('cleaning...')
         this_lines = clean_coca_lines_regex(raw_lines, corpus_ids)
     print('extracting trigrams...')
-    all_trigrams = {key: zipngram2(corpus, 3) for key, corpus in this_lines}
+    all_trigrams = {key: zipngram2(corpus, 4) for key, corpus in this_lines}
     trigrams = {key: Counter(list(trigrams)) for key, trigrams in all_trigrams.items()}
     # Can't find anything remotely faster than this
     trigrams = [(corpus, *ngram, freq) for corpus, corpus_dict in trigrams.items() for ngram, freq in corpus_dict.items()]

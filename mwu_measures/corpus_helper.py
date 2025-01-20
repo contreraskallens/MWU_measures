@@ -22,7 +22,7 @@ class Fetcher():
         ngrams = list(set(ngrams))
         bigrams = []
         trigrams = []
-
+        fourgrams = []
         for ngram in ngrams:
             split_ngram = ngram.split()
             if len(split_ngram) == 2:
@@ -31,14 +31,23 @@ class Fetcher():
                 if not from_text:
                     bigrams.append((split_ngram[0], split_ngram[1]))
                 trigrams.append((' '.join((split_ngram[0], split_ngram[1])), split_ngram[2]))
+            elif len(split_ngram) ==4:
+                if not from_text:
+                    bigrams.append((split_ngram[0], split_ngram[1]))
+                    trigrams.append((' '.join((split_ngram[0], split_ngram[1])), split_ngram[2]))
+                fourgrams.append((' '.join((split_ngram[0], split_ngram[1], split_ngram[2])), split_ngram[3]))
             else:
                 print(split_ngram)
         bigrams = [list(bigram) for bigram in set(bigrams)]
         trigrams = [list(trigram) for trigram in set(trigrams)]
+        fourgrams = [list(fourgram) for fourgram in set(fourgrams)]
         self.query_corpus(bigrams, 'ug_1', 'ug_2')
         self.bigram_scores = self.corpus.get_ngram_scores('ug_1', 'ug_2', 2)
         self.query_corpus(trigrams, 'big_1', 'ug_3')
         self.trigram_scores = self.corpus.get_ngram_scores('big_1', 'ug_3', 3)
+        self.query_corpus(fourgrams, 'trig_1', 'ug_4')
+        self.fourgram_scores = self.corpus.get_ngram_scores('trig_1', 'ug_4', 4)
+        print(self.fourgram_scores)
 
     def get_measures(self, ngram, normalized=True):
         if normalized:
@@ -48,6 +57,7 @@ class Fetcher():
         split_ngram = ngram.split()
         ug_1 = split_ngram[0]
         ug_2 = split_ngram[1]
+        ug_3 = split_ngram[2]
         if len(split_ngram) == 2:
             mwu_measures = self.bigram_scores[mode].loc[(self.bigram_scores[mode].ug_1 == ug_1) & (self.bigram_scores[mode].ug_2 == ug_2)]
             mwu_measures = mwu_measures.rename(columns={'ug_1': 'comp_1', 'ug_2': 'comp_2'})
@@ -58,7 +68,6 @@ class Fetcher():
                 return mwu_measures
         elif len(split_ngram) == 3:
             big_1 = ' '.join([ug_1, ug_2])
-            ug_3 = split_ngram[2]
             first_mwu = self.bigram_scores[mode].loc[(self.bigram_scores[mode].ug_1 == ug_1) & (self.bigram_scores[mode].ug_2 == ug_2)]
             first_mwu = first_mwu.rename(columns={'ug_1': 'comp_1', 'ug_2': 'comp_2'})
             second_mwu = self.trigram_scores[mode].loc[(self.trigram_scores[mode].big_1 == big_1) & (self.trigram_scores[mode].ug_3 == ug_3)]
@@ -68,7 +77,23 @@ class Fetcher():
                 return None
             else:
                 return pd.concat([first_mwu, second_mwu], axis=0).reset_index(drop=True)
-    
+        elif len(split_ngram) == 4:
+            big_1 = ' '.join([ug_1, ug_2])
+            trig_1 = ' '.join([ug_1, ug_2, ug_3])
+            ug_4 = split_ngram[3]
+            first_mwu = self.bigram_scores[mode].loc[(self.bigram_scores[mode].ug_1 == ug_1) & (self.bigram_scores[mode].ug_2 == ug_2)]
+            first_mwu = first_mwu.rename(columns={'ug_1': 'comp_1', 'ug_2': 'comp_2'})
+            second_mwu = self.trigram_scores[mode].loc[(self.trigram_scores[mode].big_1 == big_1) & (self.trigram_scores[mode].ug_3 == ug_3)]
+            second_mwu = second_mwu.rename(columns={'big_1': 'comp_1', 'ug_3': 'comp_2'})
+            third_mwu = second_mwu = self.trigram_scores[mode].loc[(self.trigram_scores[mode].trig_1 == trig_1) & (self.trigram_scores[mode].ug_4 == ug_4)]
+            third_mwu = second_mwu.rename(columns={'trig_1': 'comp_1', 'ug_4': 'comp_2'})
+            if len(first_mwu) == 0 or len(second_mwu) == 0:
+                print(f"No data for fourgram {ngram}")
+                return None
+            else:
+                return pd.concat([first_mwu, second_mwu, third_mwu], axis=0).reset_index(drop=True)
+
+
     def weight_measures(self, mwu_measures, weight_dict=default_weights):
         for col in mwu_measures.columns:
             if col in weight_dict.keys():
@@ -90,6 +115,7 @@ class Fetcher():
     def get_measures_batch(self, ngrams, normalized=True, from_text=False):
         bigrams = []
         trigrams = []
+        fourgrams = []
         for ngram in ngrams:
             split_ngram = ngram.split()
             if len(split_ngram) == 2:
@@ -98,17 +124,26 @@ class Fetcher():
                 if not from_text:
                     bigrams.append((split_ngram[0], split_ngram[1]))
                 trigrams.append((' '.join((split_ngram[0], split_ngram[1])), split_ngram[2]))
+            elif len(split_ngram) == 4:
+                if not from_text:
+                    bigrams.append((split_ngram[0], split_ngram[1]))
+                    trigrams.append((' '.join((split_ngram[0], split_ngram[1])), split_ngram[2]))
+                fourgrams.append((' '.join((split_ngram[0], split_ngram[1], split_ngram[2])), split_ngram[3]))
         bigrams = pd.DataFrame(bigrams, columns=['ug_1', 'ug_2'])
         trigrams = pd.DataFrame(trigrams, columns=['big_1', 'ug_3'])
+        fourgrams = pd.DataFrame(fourgrams, columns=['trig_1', 'ug_4'])
         if normalized:
             mode = 'normalized'
         else:
             mode = 'raw'
         bigram_scores = pd.merge(self.bigram_scores[mode], bigrams, how='inner')
         trigram_scores = pd.merge(self.trigram_scores[mode], trigrams, how='inner')
+        fourgram_scores = pd.merge(self.fourgram_scores[mode], fourgrams, how='inner')
         bigram_scores = bigram_scores.rename(columns={'ug_1': 'comp_1', 'ug_2': 'comp_2'})
         trigram_scores = trigram_scores.rename(columns={'big_1': 'comp_1', 'ug_3' : 'comp_2'})
-        return pd.concat([bigram_scores, trigram_scores], axis=0).reset_index(drop=True)
+        fourgram_scores = fourgram_scores.rename(columns={'trig_1': 'comp_1', 'ug_4' : 'comp_2'})
+
+        return pd.concat([bigram_scores, trigram_scores, fourgram_scores], axis=0).reset_index(drop=True)
 
     def get_score_batch(self, ngrams, weights = default_weights, from_text=False, normalized=True):
         self.create_scores(ngrams)

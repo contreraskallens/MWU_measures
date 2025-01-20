@@ -21,7 +21,9 @@ class Corpus():
                         ug_1 UINT64,
                         ug_2 UINT64,
                         ug_3 UINT64,
+                        ug_4 UINT64,
                         big_1 UINT64,
+                        trig_1 UINT64,
                         freq INTEGER
                         )
                 """)
@@ -48,9 +50,10 @@ class Corpus():
             chunk_unigrams, chunk_trigrams = ngram_lists
             chunk_unigrams = pd.DataFrame(chunk_unigrams, columns=['corpus', 'ug', 'freq'])
             chunk_unigrams['corpus'] = chunk_unigrams['corpus'].astype(str)
-            chunk_trigrams = pd.DataFrame(chunk_trigrams, columns=['corpus', 'ug_1', 'ug_2', 'ug_3', 'freq'])
+            chunk_trigrams = pd.DataFrame(chunk_trigrams, columns=['corpus', 'ug_1', 'ug_2', 'ug_3', 'ug_4', 'freq'])
             chunk_trigrams['corpus'] = chunk_trigrams['corpus'].astype(str)
             chunk_trigrams['big_1'] = chunk_trigrams['ug_1'] + ' ' + chunk_trigrams['ug_2']
+            chunk_trigrams['trig_1'] = chunk_trigrams['big_1'] + ' ' + chunk_trigrams['ug_3']
             conn.register("unigram_df", chunk_unigrams)
             conn.register("trigram_df", chunk_trigrams)
             
@@ -73,7 +76,9 @@ class Corpus():
                         HASH(ug_1) AS ug_1,
                         HASH(ug_2) AS ug_2,
                         HASH(ug_3) AS ug_3,
+                        HASH(ug_4) AS ug_4,
                         HASH(big_1) AS big_1,
+                        HASH(trig_1) AS trig_1,
                         freq
                     FROM trigram_df
                 )
@@ -126,16 +131,18 @@ class Corpus():
                     SELECT 
                         ug_1, 
                         ug_2, 
-                        ug_3, 
+                        ug_3,
+                        ug_4,
                         big_1,
-                        COALESCE(COLUMNS(* EXCLUDE(ug_1, ug_2, ug_3, big_1)), 0)
+                        trig_1,
+                        COALESCE(COLUMNS(* EXCLUDE(ug_1, ug_2, ug_3, ug_4, big_1, trig_1)), 0)
                     FROM trigram_db
                 )""")
             # Add column with total frequency
             conn.execute("""
                 CREATE OR REPLACE TABLE trigram_db AS (
                     SELECT *, 
-                    LIST_SUM(LIST_VALUE(*COLUMNS(* EXCLUDE (ug_1, ug_2, ug_3, big_1)))) AS freq
+                    LIST_SUM(LIST_VALUE(*COLUMNS(* EXCLUDE (ug_1, ug_2, ug_3, ug_4, big_1, trig_1)))) AS freq
                     FROM trigram_db
                 )""")
             # Filter on threshold and clean dummy trigrams
@@ -145,10 +152,7 @@ class Corpus():
                     FROM trigram_db
                     WHERE 
                         freq > {threshold}
-                        AND ug_1 != HASH('END')
-                        AND ug_2 != HASH('END')
                 )""")
-            # TODO: ARE THERE REPEATED LINES IN TRIGRAM_DB? WHY?
             # Same for unigrams
             conn.execute("""
                 CREATE OR REPLACE TABLE unigram_db AS (
@@ -173,110 +177,112 @@ class Corpus():
         
     def create_totals(self):
         with duckdb.connect(self.path) as conn:
-            conn.execute(
-                """
-                CREATE OR REPLACE TEMPORARY TABLE trigram_totals AS
-                WITH total_freq AS (
-                    SELECT 
-                        ug_1,
-                        ug_2,
-                        ug_3,
-                        big_1,
-                        freq
-                    FROM trigram_db
-                ), token_frequency AS (
-                    SELECT 
-                        max(freq) AS max_token_trigram
-                    FROM total_freq
-                ), type_1 AS (
-                    SELECT max(typef_1) as max_type1_trigram
-                    FROM (
-                        SELECT 
-                            ug_3,
-                            count( * ) AS typef_1
-                        FROM total_freq
-                        GROUP BY ug_3
-                    )
-                ), type_2 AS (
-                    SELECT 
-                        max(typef_2) AS max_type2_trigram
-                    FROM (
-                        SELECT
-                            ug_1,
-                            ug_2,
-                            count( * ) AS typef_2
-                        FROM total_freq
-                        GROUP BY
-                            ug_1,
-                            ug_2
-                    )
-                )
-                SELECT
-                    token_frequency.max_token_trigram AS max_token,
-                    type_1.max_type1_trigram AS max_type1,
-                    type_2.max_type2_trigram AS max_type2,
-                    3 as ngram_length
-                FROM 
-                    token_frequency,
-                    type_1,
-                    type_2
-            """)            
+    #         conn.execute(
+    #             """
+    #             CREATE OR REPLACE TEMPORARY TABLE trigram_totals AS
+    #             WITH total_freq AS (
+    #                 SELECT 
+    #                     ug_1,
+    #                     ug_2,
+    #                     ug_3,
+    #                     ug_4,
+    #                     big_1,
+    #                     trig_1,
+    #                     freq
+    #                 FROM trigram_db
+    #             ), token_frequency AS (
+    #                 SELECT 
+    #                     max(freq) AS max_token_trigram
+    #                 FROM total_freq
+    #             ), type_1 AS (
+    #                 SELECT max(typef_1) as max_type1_trigram
+    #                 FROM (
+    #                     SELECT 
+    #                         ug_3,
+    #                         count( * ) AS typef_1
+    #                     FROM total_freq
+    #                     GROUP BY ug_3
+    #                 )
+    #             ), type_2 AS (
+    #                 SELECT 
+    #                     max(typef_2) AS max_type2_trigram
+    #                 FROM (
+    #                     SELECT
+    #                         ug_1,
+    #                         ug_2,
+    #                         count( * ) AS typef_2
+    #                     FROM total_freq
+    #                     GROUP BY
+    #                         ug_1,
+    #                         ug_2
+    #                 )
+    #             )
+    #             SELECT
+    #                 token_frequency.max_token_trigram AS max_token,
+    #                 type_1.max_type1_trigram AS max_type1,
+    #                 type_2.max_type2_trigram AS max_type2,
+    #                 3 as ngram_length
+    #             FROM 
+    #                 token_frequency,
+    #                 type_1,
+    #                 type_2
+    #         """)            
 
-            conn.execute(
-                """
-                CREATE OR REPLACE TEMPORARY TABLE bigram_totals AS
-                WITH total_freq AS (
-                    SELECT
-                        ug_1,
-                        ug_2,
-                        SUM(freq) as freq
-                    FROM trigram_db
-                    GROUP BY 
-                        ug_1,
-                        ug_2
-                ), token_frequency AS (
-                    SELECT 
-                        max(freq) AS max_token_bigram
-                    FROM total_freq
-                ), type_1 AS (
-                    SELECT 
-                        max(typef_1) AS max_type1_bigram
-                    FROM (
-                        SELECT
-                            ug_2,
-                            count( * ) AS typef_1
-                        FROM total_freq
-                        GROUP BY ug_2
-                    )
-                ), type_2 AS (
-                    SELECT max(typef_2) AS max_type2_bigram
-                    FROM (
-                        SELECT ug_1,
-                        count( * ) AS typef_2
-                    FROM total_freq
-                    GROUP BY ug_1
-                    )
-                )
-                SELECT
-                    token_frequency.max_token_bigram AS max_token,
-                    type_1.max_type1_bigram AS max_type1,
-                    type_2.max_type2_bigram AS max_type2,
-                    2 AS ngram_length
-                FROM 
-                    token_frequency,
-                    type_1,
-                    type_2
-            """)
+    #         conn.execute(
+    #             """
+    #             CREATE OR REPLACE TEMPORARY TABLE bigram_totals AS
+    #             WITH total_freq AS (
+    #                 SELECT
+    #                     ug_1,
+    #                     ug_2,
+    #                     SUM(freq) as freq
+    #                 FROM trigram_db
+    #                 GROUP BY 
+    #                     ug_1,
+    #                     ug_2
+    #             ), token_frequency AS (
+    #                 SELECT 
+    #                     max(freq) AS max_token_bigram
+    #                 FROM total_freq
+    #             ), type_1 AS (
+    #                 SELECT 
+    #                     max(typef_1) AS max_type1_bigram
+    #                 FROM (
+    #                     SELECT
+    #                         ug_2,
+    #                         count( * ) AS typef_1
+    #                     FROM total_freq
+    #                     GROUP BY ug_2
+    #                 )
+    #             ), type_2 AS (
+    #                 SELECT max(typef_2) AS max_type2_bigram
+    #                 FROM (
+    #                     SELECT ug_1,
+    #                     count( * ) AS typef_2
+    #                 FROM total_freq
+    #                 GROUP BY ug_1
+    #                 )
+    #             )
+    #             SELECT
+    #                 token_frequency.max_token_bigram AS max_token,
+    #                 type_1.max_type1_bigram AS max_type1,
+    #                 type_2.max_type2_bigram AS max_type2,
+    #                 2 AS ngram_length
+    #             FROM 
+    #                 token_frequency,
+    #                 type_1,
+    #                 type_2
+    #         """)
 
-            conn.execute(
-                """
-                CREATE OR REPLACE TABLE ngram_totals AS
-                SELECT *
-                FROM trigram_totals
-                UNION ALL 
-                SELECT *
-                FROM bigram_totals
-            """)
+    #         conn.execute(
+    #             """
+    #             CREATE OR REPLACE TABLE ngram_totals AS
+    #             SELECT *
+    #             FROM trigram_totals
+    #             UNION ALL 
+    #             SELECT *
+    #             FROM bigram_totals
+    #         """)
 
             conn.execute("""
                 CREATE OR REPLACE TABLE corpus_proportions AS (
@@ -350,7 +356,7 @@ class Corpus():
                 SELECT
                     {source},
                     {target},
-                    SUM(COLUMNS(* EXCLUDE(ug_1, ug_2, ug_3, big_1))),
+                    SUM(COLUMNS(* EXCLUDE(ug_1, ug_2, ug_3, ug_4, big_1, trig_1))),
                 FROM trigram_db
                 WHERE 
                     {source} IN (SELECT {source} FROM reduced_query) OR 
@@ -466,7 +472,7 @@ class Corpus():
                 SELECT column_name 
                 FROM information_schema.columns
                 WHERE table_name = 'filtered_db'
-                    AND column_name NOT IN ('ug_1', 'ug_2', 'ug_3', 'big_1', 'freq')
+                    AND column_name NOT IN ('ug_1', 'ug_2', 'ug_3', 'ug_4', 'big_1', 'trig_1', 'freq')
         """).fetchall()
             corpus_names = [name[0] for name in corpus_names]
             join_query = ', '.join([f'''
@@ -475,7 +481,6 @@ class Corpus():
                                             THEN prop_table."{name}" * log2(prop_table."{name}" / corpus_proportions."{name}") 
                                         ELSE 0 
                                     END AS "{name}"''' for name in corpus_names])
-            
             conn.execute(
             f"""
             CREATE OR REPLACE TEMPORARY TABLE dispersion_temp AS
