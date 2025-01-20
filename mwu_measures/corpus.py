@@ -897,6 +897,8 @@ class Corpus():
                 SELECT
                     MIN(token_freq) AS min_tok,
                     MAX(token_freq) AS max_tok,
+                    MIN(dispersion) AS min_disp,
+                    MAX(dispersion) AS max_disp,
                     MIN(typef_1) AS min_type_1,
                     MAX(typef_1) AS max_type_1,
                     MIN(typef_2) AS min_type_2,
@@ -928,8 +930,8 @@ class Corpus():
                     1 - ((LOG(typef_2) - LOG(min_max.min_type_2)) / (LOG(min_max.max_type_2) / LOG(min_max.min_type_2))) AS type_2,
                     (entropy_1 - min_max.min_entropy_1) / (min_max.max_entropy_1 - min_max.min_entropy_1) AS entropy_1,
                     (entropy_2 - min_max.min_entropy_2) / (min_max.max_entropy_2 - min_max.min_entropy_2) AS entropy_2,
-                    (fw_assoc - min_max.min_fw_assoc) / (min_max.max_fw_assoc - min_max.min_fw_assoc) AS fw_assoc,
-                    (bw_assoc - min_max.min_bw_assoc) / (min_max.max_bw_assoc - min_max.min_bw_assoc) AS bw_assoc,
+                    fw_assoc AS fw_assoc,
+                    bw_assoc AS bw_assoc,
                     ngram_length
             FROM raw_measures
             LEFT JOIN min_max

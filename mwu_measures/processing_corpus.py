@@ -16,7 +16,7 @@ def process_text(text, line_sep='\n', include_last=True):
     text = pd.Series(text)
     text = text.str.lower()
     text = text.str.replace('\n', '')
-    text = text.str.replace('-', '')
+    text = text.str.replace('-', ' ')
     text = text.str.replace(r'\d+', ' NUMBER ', regex=True)
     text = text.str.strip()
     text = text.str.replace(r' +\W+', ' ', regex=True)
