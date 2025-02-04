@@ -169,3 +169,13 @@ small_corpus.txt
 mwu_measures/db/coca.db
 /mwu_measures/corpora/coca_sample
 mwu_measures/db/coca_sample.db
+mwu_measures/db/coca.db.tmp/duckdb_temp_storage-0.tmp
+mwu_measures/db/coca.db.tmp/duckdb_temp_storage-1.tmp
+mwu_measures/db/coca.db.tmp/duckdb_temp_storage-2.tmp
+mwu_measures/db/coca.db.tmp/duckdb_temp_storage-3.tmp
+mwu_measures/db/coca.db.tmp/duckdb_temp_storage-4.tmp
+mwu_measures/db/coca.db.tmp/duckdb_temp_storage-5.tmp
+mwu_measures/db/coca.db.tmp/duckdb_temp_storage-6.tmp
+mwu_measures/db/test.db
+mwu_measures/db/test.db
+/mwu_measures/db

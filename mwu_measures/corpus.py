@@ -2,7 +2,6 @@ import duckdb
 import pandas as pd
 import os
 from rich.progress import Progress, TextColumn, SpinnerColumn, MofNCompleteColumn
-from rich.console import Console
 
 class Corpus():
     def __init__(self, corpus_name):
@@ -10,7 +9,6 @@ class Corpus():
         self.path = f"mwu_measures/db/{corpus_name}.db"
         if os.path.isfile(f"mwu_measures/db/{corpus_name}.db"):
             print('Using preexisting corpus')
-            # self.conn = duckdb.connect()
         else:
             print("DB doesn't exist. Allocate before calculations.")
             with duckdb.connect(self.path) as conn:
@@ -91,7 +89,6 @@ class Corpus():
 
     def consolidate_corpus(self, threshold=2):
         with duckdb.connect(self.path) as conn:
-            # conn.execute("""CREATE OR REPLACE TABLE trigram_db_temp AS""")
             all_corpora = conn.execute("SELECT DISTINCT corpus FROM trigram_db_temp").fetchall()
             all_corpora = ["'" + str(corpus_list[0]) + "'" for corpus_list in all_corpora]
             all_corpora = ", ".join(all_corpora)
@@ -284,30 +281,6 @@ class Corpus():
                     FROM unigram_db
             )""")
 
-            # self(
-            # """
-            #     CREATE OR REPLACE TABLE unigram_totals AS
-            #     SELECT 
-            #         ug_hash AS ug,
-            #         freq,
-            #         SUM(SUM(freq)) OVER () AS total_ug,
-            #     FROM unigram_db
-            #     GROUP BY (ug)
-            # """)
-
-            # conn.execute(
-            #     """
-            #     CREATE OR REPLACE TABLE corpus_proportions AS
-            #         SELECT 
-            #             corpus,
-            #             SUM(freq) / (SELECT SUM(freq) FROM unigram_db) AS corpus_prop
-            #         FROM unigram_db 
-            #         GROUP BY corpus
-            # """)
-
-        # def get_unigram(self, unigram):
-        #     unigram_info = self(f"EXECUTE get_unigram({unigram})").fetch_df()
-        #     return unigram_info
 
 # Below: methods related to MWU extraction directly, previously in corpus_helper.
 
@@ -340,43 +313,22 @@ class Corpus():
                 FROM query_ref
             )""")
 
-
     # MWU functions
-
-    def make_filtered_db(self, source, target):
-            self(
-            f"""
-            CREATE OR REPLACE TABLE filtered_db AS (
-                SELECT
-                    {source},
-                    {target},
-                    SUM(COLUMNS(* EXCLUDE(ug_1, ug_2, ug_3, big_1))),
-                FROM trigram_db
-                WHERE 
-                    {source} IN (SELECT {source} FROM reduced_query) OR 
-                    {target} IN (SELECT {target} FROM reduced_query)
-                GROUP BY 
-                    {source},
-                    {target}
-            )
-        """)
 
     def make_token_freq(self, source, target):
         # Make a table with token frequencies for the queried ngrams
-
-        self(f"""
-        CREATE OR REPLACE TABLE token_freq AS
-        SELECT 
-            {source},
-            {target},
-            SUM(freq) AS token_freq
-        FROM trigram_db
-        SEMI JOIN this_query
-        USING({source}, {target})
-        GROUP BY({source}, {target})
-        ORDER BY {source}
-
-    """)
+        with duckdb.connect(self.path) as conn:
+            conn.execute(f"""
+                CREATE OR REPLACE TABLE token_freq AS
+                SELECT 
+                    {source},
+                    {target},
+                    SUM(freq) AS token_freq
+                FROM this_query
+                INNER JOIN trigram_db
+                USING({source}, {target})
+                GROUP BY {source}, {target}
+                """)
         # After getting token freq, we can filter non-occurring ngrams from the query
 
     def reduce_query(self, source, target):
@@ -391,16 +343,29 @@ class Corpus():
             FROM this_query
             SEMI JOIN token_freq
             USING({source}, {target})
+            ORDER BY {source}, {target}
         """)
             conn.execute(
             f"""
-            CREATE OR REPLACE TABLE token_freq AS
-            SELECT *
-            FROM reduced_query
-            LEFT JOIN token_freq
-            USING({source}, {target})
+            CREATE OR REPLACE TABLE filtered_db AS (
+            WITH filtered_freqs AS (
+                SELECT
+                    *
+                FROM trigram_db
+                WHERE
+                    {source} IN (SELECT {source} FROM reduced_query) OR 
+                    {target} IN (SELECT {target} FROM reduced_query) 
+                ORDER BY {source}, {target}
+            )
+            SELECT
+                {source},
+                {target},
+                SUM(COLUMNS(* EXCLUDE(ug_1, ug_2, ug_3, big_1)))
+            FROM filtered_freqs
+            GROUP BY {source}, {target}
+            )
         """)
-        self.make_filtered_db(source, target)
+
     def make_type_freq(self, source, target):
         with duckdb.connect(self.path) as conn:
             conn.execute(
@@ -423,25 +388,35 @@ class Corpus():
             GROUP BY
                 {source}
         """)
-            # Make it temporary so that the computations happen in memory.
+
             conn.execute(
             f"""
-            CREATE OR REPLACE TEMPORARY TABLE type_freq_temp AS
-            WITH freq_1_reduced AS (
+            CREATE OR REPLACE TABLE type_freq AS
+            WITH type_1 AS (
+                SELECT 
+                    {target},
+                    COUNT( * ) AS typef_1
+                FROM filtered_db
+                GROUP BY
+                    {target}
+            ), type_2 AS (
+            SELECT 
+                {source},
+                COUNT( * ) AS typef_2
+            FROM filtered_db
+            GROUP BY
+                {source}
+            ), freq_1_reduced AS (
                 SELECT *
                 FROM reduced_query
                 LEFT JOIN type_1
                 USING ({target})
+            ), type_freq_temp AS (
+                SELECT *
+                FROM freq_1_reduced
+                LEFT JOIN type_2
+                USING ({source})
             )
-            SELECT *
-            FROM freq_1_reduced
-            LEFT JOIN type_2
-            USING ({source})
-        """)
-            # Then assign to on-disk table.
-            conn.execute(
-            f"""
-            CREATE OR REPLACE TABLE type_freq AS
             SELECT *
             FROM reduced_query
             LEFT JOIN type_freq_temp
@@ -478,7 +453,7 @@ class Corpus():
             
             conn.execute(
             f"""
-            CREATE OR REPLACE TEMPORARY TABLE dispersion_temp AS
+            CREATE OR REPLACE TABLE dispersion AS
             WITH dist_table AS (
                 SELECT 
                     {source},
@@ -491,22 +466,18 @@ class Corpus():
                     {target},
                     LIST_SUM(LIST_VALUE(*COLUMNS(* EXCLUDE ({source}, {target})))) AS kld
                 FROM dist_table
-            )
-            SELECT 
+            ), dispersion_temp AS (SELECT 
                 {source},
                 {target},
                 1 - pow(EXP(1), -(kld)) as dispersion
             FROM kld_table
+            )
+            SELECT * 
+            FROM reduced_query
+            LEFT JOIN dispersion_temp
+            USING({source}, {target})
         """)
 
-            conn.execute(
-                f"""
-                CREATE OR REPLACE TABLE dispersion AS
-                SELECT * 
-                FROM reduced_query
-                LEFT JOIN dispersion_temp
-                USING({source}, {target})
-        """)
     def make_associations(self, source, target):
         with duckdb.connect(self.path) as conn:
             conn.execute(
@@ -515,42 +486,29 @@ class Corpus():
             WITH source_freq AS (
                 SELECT 
                     DISTINCT {source},
-                    freq as source_freq 
-                FROM token_freq 
-                LEFT JOIN (
-                    SELECT 
-                        {source},
-                        SUM(freq) AS freq
-                    FROM filtered_db
-                    GROUP BY {source}
-                    )
-                USING ({source})
+                    SUM(freq) AS source_freq 
+                FROM filtered_db 
+                GROUP BY {source}
             ), target_freq AS (
                 SELECT 
                     DISTINCT {target},
-                    freq as target_freq 
-                FROM token_freq 
-                LEFT JOIN (
-                    SELECT 
-                        {target},
-                        SUM(freq) AS freq
-                    FROM filtered_db
-                    GROUP BY {target}
-                    )
-                USING ({target})
+                    SUM(freq) AS target_freq 
+                FROM filtered_db 
+                GROUP BY {target}
             )
             SELECT 
                 *,
+                token_freq,
                 (SELECT SUM(freq) AS total_freq FROM trigram_db) AS total_freq
             FROM token_freq
             LEFT JOIN source_freq
             USING ({source})
             LEFT JOIN target_freq
             USING ({target})
-        """)
+            """)
             conn.execute(
             f"""
-            CREATE OR REPLACE TEMPORARY TABLE associations_temp AS
+            CREATE OR REPLACE TABLE associations AS
             WITH probs_db AS (
                 SELECT
                     {source},
@@ -605,15 +563,13 @@ class Corpus():
                     {target},
                     1 - pow(EXP(1), -(kld_1 + kld_2)) AS bw_assoc
                 FROM backward_kld
-            )
-            SELECT *
+            ), associations_temp AS (
+            SELECT 
+                *
             FROM forward_assoc
             LEFT JOIN backward_assoc
             USING({source}, {target})
-        """)
-            conn.execute(
-            f"""
-            CREATE OR REPLACE TABLE associations AS
+            )
             SELECT *
             FROM reduced_query
             LEFT JOIN associations_temp
@@ -628,159 +584,94 @@ class Corpus():
         with duckdb.connect(self.path) as conn:
             conn.execute(
             f"""
-            CREATE OR REPLACE TEMPORARY TABLE entropy_real_{slot} AS
+            CREATE OR REPLACE TEMPORARY TABLE entropy_real AS
             WITH all_freqs AS (
                 SELECT
                     {source},
                     {target},
-                    freq AS total_freq
+                    freq
                 FROM filtered_db
                 SEMI JOIN reduced_query
                 USING({source})
-            ), source_freqs AS (
-                SELECT *
-                FROM reduced_query
-                LEFT JOIN all_freqs
-                USING({source})
-            ), freqs AS (
-                SELECT
+            ), total_freqs AS (
+                SELECT 
                     {source},
-                    {target} AS target,
-                    {target}_1 AS {target},
-                    total_freq
-                FROM source_freqs
-            ), totals AS (
-                SELECT
-                    {source},
-                    SUM(total_freq) AS total
-                FROM freqs
+                    SUM(freq) AS total_freq
+                FROM all_freqs
                 GROUP BY {source}
-            ), probs AS (
-                SELECT 
-                    {source},
-                    target,
-                    {target},
-                    total_freq / total AS prob
-                FROM freqs
-                LEFT JOIN totals
+            ), all_probs AS (
+                SELECT *
+                FROM all_freqs
+                LEFT JOIN total_freqs
                 USING({source})
-            ), info AS (
-                SELECT
-                    {source},
-                    target,
-                    CASE
-                        WHEN prob > 0 THEN prob * log2(prob)
-                        ELSE 0
-                    END AS info
-                FROM probs
-            ), entropy AS (
+            ), all_infos AS (
                 SELECT 
-                    {source},
-                    target AS {target},
-                    SUM(CASE WHEN info < 0 THEN -info ELSE 0 END) AS entropy,
-                    log2(COUNT (*)) AS normalizer
-                FROM info
-                GROUP BY {source}, target
+                    *, 
+                    freq / total_freq AS prob, 
+                    LOG2(freq / total_freq) AS info
+                FROM all_probs
             )
             SELECT
                 {source},
-                {target},
-                CASE
-                    WHEN normalizer > 0 THEN entropy / normalizer
-                    ELSE 0
-                END as entropy_real
-            FROM entropy
+                -1 * (SUM(prob * info) / LOG2(COUNT(*))) AS entropy_real
+            FROM all_infos
+            GROUP BY {source}
         """)
-
-    # Counterfactual entropy
-
             conn.execute(
             f"""
-            CREATE OR REPLACE TEMPORARY TABLE entropy_cf_{slot} AS
+            CREATE OR REPLACE TEMPORARY TABLE entropy_cf AS
             WITH all_freqs AS (
                 SELECT
                     {source},
-                    {target},
-                    freq AS total_freq
-                FROM filtered_db
-                SEMI JOIN reduced_query
-                USING({source})
-            ), source_freqs AS (
-                SELECT *
+                    reduced_query.{target} AS target,
+                    filtered_db.{target} AS {target},
+                    freq
                 FROM reduced_query
-                LEFT JOIN all_freqs
+                LEFT JOIN filtered_db
                 USING({source})
-            )
-            , freqs AS (
+            ), filtered_freqs AS (
                 SELECT
+                    *
+                FROM all_freqs
+                WHERE target <> {target}
+            ), total_freqs AS (
+                SELECT 
                     {source},
-                    {target} AS target,
-                    {target}_1 AS {target},
-                    CASE
-                        WHEN {target} = {target}_1 THEN 0
-                        ELSE total_freq
-                    END AS total_freq
-                FROM source_freqs
-            ), totals AS (
-                SELECT
-                    {source},
-                    SUM(total_freq) AS total
-                FROM freqs
+                    SUM(freq) AS total_freq
+                FROM filtered_freqs
                 GROUP BY {source}
-            ), probs AS (
-                SELECT 
-                    {source},
-                    target,
-                    {target},
-                    total_freq / total AS prob
-                FROM freqs
-                LEFT JOIN totals
+            ), all_probs AS (
+                SELECT *
+                FROM filtered_freqs
+                LEFT JOIN total_freqs
                 USING({source})
-            ), info AS (
-                SELECT
-                    {source},
-                    target,
-                    CASE
-                        WHEN prob > 0 THEN prob * log2(prob)
-                        ELSE 0
-                    END AS info
-                FROM probs
-                WHERE target != {target}
-            ), entropy AS (
+            ), all_infos AS (
                 SELECT 
-                    {source},
-                    target AS {target},
-                    SUM(CASE WHEN info < 0 THEN -info ELSE 0 END) AS entropy,
-                    log2(COUNT (*)) AS normalizer
-                FROM info
-                GROUP BY {source}, target
+                    *, 
+                    freq / total_freq AS prob, 
+                    LOG2(freq / total_freq) AS info
+                FROM all_probs
             )
             SELECT
                 {source},
-                {target},
-                CASE
-                    WHEN normalizer > 0 THEN entropy / normalizer
-                    ELSE 0
-                END as entropy_cf
-            FROM entropy
+                target AS {target},
+                -1 * (SUM(prob * info) / LOG2(COUNT(*))) AS entropy_cf
+            FROM all_infos
+            GROUP BY {source}, target
         """)
-            conn.execute(
-            f"""
-            CREATE OR REPLACE TEMPORARY TABLE entropy_{slot}_temp AS
-            SELECT 
-                {source},
-                {target},
-                entropy_cf - entropy_real AS entropy_{slot}
-            FROM entropy_real_{slot}
-            INNER JOIN entropy_cf_{slot}
-            USING({source}, {target})
-        """)
-            conn.execute(f"""
-            CREATE OR REPLACE TABLE entropy_{slot} AS
-            SELECT *
-            FROM entropy_{slot}_temp
-        """)
-        
+            conn.execute(f"""CREATE OR REPLACE TABLE entropy_{slot} AS
+                        WITH both_entropies AS (
+                            SELECT *
+                            FROM entropy_cf
+                            LEFT JOIN entropy_real
+                            USING({source})
+                        )
+                        SELECT
+                            {source},
+                            {target},
+                            entropy_cf - entropy_real AS entropy_{slot}
+                        FROM both_entropies
+                        """)
 
 
     def make_entropy_diffs(self, source, target):
@@ -789,14 +680,12 @@ class Corpus():
         with duckdb.connect(self.path) as conn:
             conn.execute(
             f"""
-            CREATE OR REPLACE TEMPORARY TABLE entropy_diffs_temp AS
-            SELECT * FROM entropy_1
-            INNER JOIN entropy_2
-            USING({source}, {target})
-        """)
-            conn.execute(
-            f"""
             CREATE OR REPLACE TABLE entropy_diffs AS
+            WITH entropy_diffs_temp AS (
+                SELECT * FROM entropy_1
+                INNER JOIN entropy_2
+                USING({source}, {target})
+            )
             SELECT 
                 {source},
                 {target},
@@ -950,9 +839,10 @@ class Corpus():
             MofNCompleteColumn(),
             SpinnerColumn(),
             transient=True) as progress:
-            compute_mwus = progress.add_task("Initializing...", task_name=f"Computing MWU scores, length {length}", total=8)
+            compute_mwus = progress.add_task("Initializing...", task_name=f"Computing MWU scores, length {length}", total=9)
             progress.update(compute_mwus, advance=1, description="Token frequencies...")
             self.make_token_freq(source, target)
+            progress.update(compute_mwus, advance=1, description="Making reduced database...")
             self.reduce_query(source, target)
             progress.update(compute_mwus, advance=1, description="Type frequencies...")
             self.make_type_freq(source, target)
@@ -966,7 +856,6 @@ class Corpus():
             self.join_measures(source, target, length)
             progress.update(compute_mwus, advance=1, description="Normalizing...")
             self.normalize_measures(source, target)
-
             progress.update(compute_mwus, advance=1, description="Cleaning up...")
             raw_measures = self.df("SELECT * FROM raw_measures")
             normalized_measures = self.df("SELECT * FROM normalized_measures")
