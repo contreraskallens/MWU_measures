@@ -856,7 +856,6 @@ class Corpus():
             self.join_measures(source, target, length)
             progress.update(compute_mwus, advance=1, description="Normalizing...")
             self.normalize_measures(source, target)
-
             progress.update(compute_mwus, advance=1, description="Cleaning up...")
             raw_measures = self.df("SELECT * FROM raw_measures")
             normalized_measures = self.df("SELECT * FROM normalized_measures")
