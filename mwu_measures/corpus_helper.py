@@ -112,10 +112,12 @@ class Fetcher():
     def get_score_batch(self, ngrams, weights = default_weights, from_text=False, normalized=True):
         self.create_scores(ngrams)
         this_measure = self.get_measures_batch(ngrams, normalized=normalized, from_text=from_text)
-        if not normalized:
-            return this_measure
-        else:
+        if normalized:
             weighted = self.weight_measures(this_measure, weights)
             mwu_score = weighted.drop('ngram_length', axis=1).sum(axis=1, numeric_only=True)
             weighted['mwu_score'] = mwu_score
+            weighted['ngram'] = weighted['comp_1'] + ' ' + weighted['comp_2']
             return (weighted[['ngram', 'comp_1', 'comp_2', 'mwu_score', 'ngram_length']], this_measure)
+        else:
+            this_measure['ngram'] = this_measure['comp_1'] + ' ' + this_measure['comp_2']
+            return(this_measure)

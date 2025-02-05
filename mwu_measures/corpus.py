@@ -89,9 +89,9 @@ class Corpus():
 
     def consolidate_corpus(self, threshold=2):
         with duckdb.connect(self.path) as conn:
-            all_corpora = conn.execute("SELECT DISTINCT corpus FROM trigram_db_temp").fetchall()
-            all_corpora = ["'" + str(corpus_list[0]) + "'" for corpus_list in all_corpora]
-            all_corpora = ", ".join(all_corpora)
+            all_corpora_names = conn.execute("SELECT DISTINCT corpus FROM trigram_db_temp").fetchall()
+            all_corpora_str = ["'" + str(corpus_list[0]) + "'" for corpus_list in all_corpora_names]
+            all_corpora = ", ".join(all_corpora_str)
             conn.execute(
                 f"""CREATE OR REPLACE TABLE trigram_db AS (
                     SELECT * 
@@ -135,6 +135,21 @@ class Corpus():
                     LIST_SUM(LIST_VALUE(*COLUMNS(* EXCLUDE (ug_1, ug_2, ug_3, big_1)))) AS freq
                     FROM trigram_db
                 )""")
+            all_corpora_refs = [name[0] for name in all_corpora_names]
+            corpus_query = [f"SUM({X}) AS {X}" for X in all_corpora_refs]
+            corpus_query = ',\n'.join(corpus_query)
+            corpus_query = corpus_query + ',\nSUM(freq) as freq\n'
+            conn.execute(f"""
+                CREATE OR REPLACE TABLE trigram_db AS (
+                    SELECT 
+                        ug_1,
+                        ug_2,
+                        ug_3,
+                        big_1,
+                        {corpus_query} 
+                    FROM trigram_db
+                    GROUP BY ug_1, ug_2, ug_3, big_1
+                )""")
             # Filter on threshold and clean dummy trigrams
             conn.execute(f"""
                 CREATE OR REPLACE TABLE trigram_db AS (
@@ -144,8 +159,8 @@ class Corpus():
                         freq > {threshold}
                         AND ug_1 != HASH('END')
                         AND ug_2 != HASH('END')
+                    ORDER BY ug_1, ug_2, ug_3
                 )""")
-            # TODO: ARE THERE REPEATED LINES IN TRIGRAM_DB? WHY?
             # Same for unigrams
             conn.execute("""
                 CREATE OR REPLACE TABLE unigram_db AS (

@@ -10,6 +10,7 @@ from nltk import everygrams
 import os
 import re
 from itertools import groupby
+import string
 
 def process_text(text, line_sep='\n', include_last=True):
     text = text.split(line_sep)
@@ -76,7 +77,7 @@ def make_processed_corpus(
         coca_texts = sorted(os.listdir(corpus_dir))
         coca_cats = [re.search(r'_.+_', text_name, re.IGNORECASE).group(0) for text_name in coca_texts]
         coca_cats = list(set(coca_cats))
-        corpus_ids = dict(zip(sorted(coca_cats), range(len(coca_cats))))
+        corpus_ids = dict(zip(sorted(coca_cats), [string.ascii_uppercase[i] for i in range(len(coca_cats))]))
         coca_text_cats = groupby(coca_texts, lambda x: re.search(r'_.+_', x, re.IGNORECASE).group(0))
         coca_text_cats = [(cat_name, list(cat_chunk)) for cat_name, cat_chunk in coca_text_cats]
         for cat_name, cat_chunk in coca_text_cats:
@@ -89,7 +90,7 @@ def make_processed_corpus(
                     with open(os.path.join(corpus_dir, coca_text)) as corpus_file:
                         raw_lines = corpus_file.read()
                     chunk_text = chunk_text + ' \n ' + raw_lines
-                ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=chunk_text, corpus='coca', corpus_ids=int(chunk_cat))
+                ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=chunk_text, corpus='coca', corpus_ids=chunk_cat)
                 this_corpus.add_chunk(ngram_dicts)
                 print('adding...')
     if test_corpus:
