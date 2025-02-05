@@ -793,16 +793,31 @@ class Corpus():
             conn.execute("DROP TABLE query_ref")
             conn.execute("VACUUM ANALYZE")
 
-    def normalize_measures(self, source, target):
+    def normalize_measures(self, source, target, entropy_limits):
         with duckdb.connect(self.path) as conn:
+            conn.execute(f"""
+            CREATE OR REPLACE TEMPORARY TABLE normalized_temp AS
+            SELECT
+                {source},
+                {target},
+                LOG(token_freq) AS token_freq,
+                dispersion AS dispersion,
+                LOG(typef_1) AS typef_1,
+                LOG(typef_2) AS typef_2,
+                CASE WHEN entropy_1 < {entropy_limits[0]} THEN {entropy_limits[0]} WHEN entropy_1 > {entropy_limits[1]} THEN {entropy_limits[1]} ELSE entropy_1 END AS entropy_1,
+                CASE WHEN entropy_2 < {entropy_limits[0]} THEN {entropy_limits[0]} WHEN entropy_2 > {entropy_limits[1]} THEN {entropy_limits[1]} ELSE entropy_2 END AS entropy_2,
+                fw_assoc,
+                bw_assoc,
+                ngram_length
+            FROM raw_measures
+            """)
             conn.execute(
-                """
-                CREATE OR REPLACE TEMPORARY TABLE min_max AS 
+                f"""
+                CREATE OR REPLACE TABLE normalized_measures AS 
+                WITH min_max AS(
                 SELECT
                     MIN(token_freq) AS min_tok,
                     MAX(token_freq) AS max_tok,
-                    MIN(dispersion) AS min_disp,
-                    MAX(dispersion) AS max_disp,
                     MIN(typef_1) AS min_type_1,
                     MAX(typef_1) AS max_type_1,
                     MIN(typef_2) AS min_type_2,
@@ -811,42 +826,53 @@ class Corpus():
                     MAX(entropy_1) AS max_entropy_1,
                     MIN(entropy_2) AS min_entropy_2,
                     MAX(entropy_2) AS max_entropy_2,
-                    MIN(fw_assoc) AS min_fw_assoc,
-                    MAX(fw_assoc) AS max_fw_assoc,
-                    MIN(bw_assoc) AS min_bw_assoc,
-                    MAX(bw_assoc) AS max_bw_assoc,
                     ngram_length
-                FROM raw_measures
+                FROM normalized_temp
                 WHERE NOT ISNAN(ngram_length)
                 GROUP BY ngram_length
-                """
                 )
-
-            conn.execute(
-                f"""
-                CREATE OR REPLACE TEMPORARY TABLE normalized_measures_temp AS
                 SELECT
                     {source},
                     {target},
-                    (LOG(token_freq) - LOG(min_max.min_tok)) / (LOG(min_max.max_tok) - LOG(min_max.min_tok)) AS token_freq,
+                    (token_freq - min_max.min_tok) / (min_max.max_tok - min_max.min_tok) AS token_freq,
                     1 - dispersion AS dispersion,
-                    1 - ((LOG(typef_1) - LOG(min_max.min_type_1)) / (LOG(min_max.max_type_1) / LOG(min_max.min_type_1))) AS type_1,
-                    1 - ((LOG(typef_2) - LOG(min_max.min_type_2)) / (LOG(min_max.max_type_2) / LOG(min_max.min_type_2))) AS type_2,
+                    1 - ((typef_1 - min_max.min_type_1) / (min_max.max_type_1 - min_max.min_type_1)) AS type_1,
+                    1 - ((typef_2 - min_max.min_type_2) / (min_max.max_type_2 - min_max.min_type_2)) AS type_2,
                     (entropy_1 - min_max.min_entropy_1) / (min_max.max_entropy_1 - min_max.min_entropy_1) AS entropy_1,
                     (entropy_2 - min_max.min_entropy_2) / (min_max.max_entropy_2 - min_max.min_entropy_2) AS entropy_2,
                     fw_assoc AS fw_assoc,
                     bw_assoc AS bw_assoc,
                     ngram_length
-            FROM raw_measures
+            FROM normalized_temp
             LEFT JOIN min_max
             USING (ngram_length)
-        """)
-            conn.execute(
                 """
-                CREATE OR REPLACE TABLE normalized_measures AS 
-                SELECT * 
-                FROM normalized_measures_temp
-        """)
+                )
+        #     conn.execute(
+        #         f"""
+        #         CREATE OR REPLACE TEMPORARY TABLE normalized_measures_temp AS
+        #         SELECT
+        #             {source},
+        #             {target},
+        #             (LOG(token_freq) - LOG(min_max.min_tok)) / (LOG(min_max.max_tok) - LOG(min_max.min_tok)) AS token_freq,
+        #             1 - dispersion AS dispersion,
+        #             1 - ((LOG(typef_1) - LOG(min_max.min_type_1)) / (LOG(min_max.max_type_1) / LOG(min_max.min_type_1))) AS type_1,
+        #             1 - ((LOG(typef_2) - LOG(min_max.min_type_2)) / (LOG(min_max.max_type_2) / LOG(min_max.min_type_2))) AS type_2,
+        #             (entropy_1 - min_max.min_entropy_1) / (min_max.max_entropy_1 - min_max.min_entropy_1) AS entropy_1,
+        #             (entropy_2 - min_max.min_entropy_2) / (min_max.max_entropy_2 - min_max.min_entropy_2) AS entropy_2,
+        #             fw_assoc AS fw_assoc,
+        #             bw_assoc AS bw_assoc,
+        #             ngram_length
+        #     FROM raw_measures
+        #     LEFT JOIN min_max
+        #     USING (ngram_length)
+        # """)
+        #     conn.execute(
+        #         """
+        #         CREATE OR REPLACE TABLE normalized_measures AS 
+        #         SELECT * 
+        #         FROM normalized_measures_temp
+        # """)
 
     def get_ngram_scores(self, source, target, length, entropy_limits=[-0.1, 0.1]):
         with Progress(
@@ -870,7 +896,7 @@ class Corpus():
             progress.update(compute_mwus, advance=1, description="Joining everything...")
             self.join_measures(source, target, length)
             progress.update(compute_mwus, advance=1, description="Normalizing...")
-            self.normalize_measures(source, target)
+            self.normalize_measures(source, target, entropy_limits)
             progress.update(compute_mwus, advance=1, description="Cleaning up...")
             raw_measures = self.df("SELECT * FROM raw_measures")
             normalized_measures = self.df("SELECT * FROM normalized_measures")
