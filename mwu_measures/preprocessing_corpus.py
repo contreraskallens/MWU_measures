@@ -43,7 +43,9 @@ def clean_coca_lines_regex(raw_lines, corpus_ids):
     processed_lines = processed_lines.replace('-', ' ')
     processed_lines = regex.sub(r'\d+', ' NUMBER ', processed_lines)
     processed_lines = regex.sub(r' \W|\W ', ' ', processed_lines)
-    processed_lines = processed_lines.split(' splitmehere ')
+    processed_lines = regex.sub(r'\s+', ' ', processed_lines)
+    processed_lines = regex.split(r'\s*splitmehere\s*', processed_lines)
+    processed_lines = [line for line in processed_lines if len(line) > 0] # get rid of empty lines
     # Might get some mileage out of converting to Series, doing vectorized, and then converting back to list.
     # Get rid of double spaces and trailing spaces, add header and footer in line
     processed_lines = ['START START ' + ' '.join(line.split()).strip() + ' END END' for line in processed_lines if len(line) > 0]
@@ -71,7 +73,6 @@ def preprocess_test():
         raw_lines = corpus_file.read().splitlines()
     split_lines = [line.split() for line in raw_lines]
     trigrams = [Counter(zipngram2(line, 4)) for line in raw_lines]
-    print(trigrams)
     corpora = ['A', 'B', 'C']
     trigrams = [(corpus, trigram[0], trigram[1], trigram[2], trigram[3], freq) for corpus, corpus_dict in zip(corpora, trigrams) for trigram, freq in corpus_dict.items()]
     unigrams = [Counter(unigrams) for unigrams in split_lines]

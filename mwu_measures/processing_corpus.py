@@ -9,24 +9,27 @@ import pandas as pd
 from nltk import everygrams
 import os
 import re
-from line_profiler import LineProfiler
 from itertools import groupby
+import string
 
-lp = LineProfiler()
-
-
-def process_text(text, line_sep='\n'):
+def process_text(text, line_sep='\n', include_last=True):
     text = text.split(line_sep)
     text = pd.Series(text)
     text = text.str.lower()
     text = text.str.replace('\n', '')
-    text = text.str.replace('-', '')
-    text = text.str.replace(r'\s\d+\s|^\d+\s|\s\d+$', ' NUMBER ', regex=True)
+    text = text.str.replace('-', ' ')
+    text = text.str.replace(r'\d+', ' NUMBER ', regex=True)
     text = text.str.strip()
-    text = text.str.replace(r'\s*\W\s*', ' ', regex=True)
+    text = text.str.replace(r' +\W+', ' ', regex=True)
+    text = text.str.replace(r'\W+ +', ' ', regex=True)
+    text = text.str.replace(r'^\W+', ' ', regex=True)
+    text = text.str.replace(r'\W+$', ' ', regex=True)
+    text = text.str.replace(r'(\w)[\.,]+(\w)', r'\1 \2', regex=True)
     text = text.str.replace(r'\s+', ' ', regex=True)
     text = text.apply(lambda line: [' '.join(ngram) for ngram in everygrams(line.split(), 2, 4)])
     text = [ngram for line in text.to_list() for ngram in line]
+    if not include_last:
+        text = text[0:-1]
     return text
 
 def make_processed_corpus(
@@ -36,6 +39,7 @@ def make_processed_corpus(
         test_corpus=False,
         chunk_size = 1000000,
         threshold = 0
+
         ):
     """
     Takes preprocessed corpus and outputs the data structures necessary to compute MWU measures.
@@ -73,7 +77,7 @@ def make_processed_corpus(
         coca_texts = sorted(os.listdir(corpus_dir))
         coca_cats = [re.search(r'_.+_', text_name, re.IGNORECASE).group(0) for text_name in coca_texts]
         coca_cats = list(set(coca_cats))
-        corpus_ids = dict(zip(sorted(coca_cats), range(len(coca_cats))))
+        corpus_ids = dict(zip(sorted(coca_cats), [string.ascii_uppercase[i] for i in range(len(coca_cats))]))
         coca_text_cats = groupby(coca_texts, lambda x: re.search(r'_.+_', x, re.IGNORECASE).group(0))
         coca_text_cats = [(cat_name, list(cat_chunk)) for cat_name, cat_chunk in coca_text_cats]
         for cat_name, cat_chunk in coca_text_cats:
@@ -86,7 +90,7 @@ def make_processed_corpus(
                     with open(os.path.join(corpus_dir, coca_text)) as corpus_file:
                         raw_lines = corpus_file.read()
                     chunk_text = chunk_text + ' \n ' + raw_lines
-                ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=chunk_text, corpus='coca', corpus_ids=int(chunk_cat))
+                ngram_dicts = preprocessing_corpus.preprocess_corpus(raw_lines=chunk_text, corpus='coca', corpus_ids=chunk_cat)
                 this_corpus.add_chunk(ngram_dicts)
                 print('adding...')
     if test_corpus:

@@ -1,5 +1,6 @@
 import pandas as pd
-default_weights = {'token_freq': 1/8, 'dispersion': 1/8, 'type_1': 1/8, 'type_2': 1/8, 'entropy_1': 1/8, 'entropy_2': 1/8, 'fw_assoc': 1/8, 'bw_assoc': 1/8}
+import numpy as np
+default_weights = [1/8, 1/8, 1/8, 1/8, 1/8, 1/8, 1/8, 1/8]
 
 
 class Fetcher():
@@ -47,7 +48,7 @@ class Fetcher():
         self.trigram_scores = self.corpus.get_ngram_scores('big_1', 'ug_3', 3)
         self.query_corpus(fourgrams, 'trig_1', 'ug_4')
         self.fourgram_scores = self.corpus.get_ngram_scores('trig_1', 'ug_4', 4)
-        print(self.fourgram_scores)
+
 
     def get_measures(self, ngram, normalized=True):
         if normalized:
@@ -58,6 +59,7 @@ class Fetcher():
         ug_1 = split_ngram[0]
         ug_2 = split_ngram[1]
         ug_3 = split_ngram[2]
+
         if len(split_ngram) == 2:
             mwu_measures = self.bigram_scores[mode].loc[(self.bigram_scores[mode].ug_1 == ug_1) & (self.bigram_scores[mode].ug_2 == ug_2)]
             mwu_measures = mwu_measures.rename(columns={'ug_1': 'comp_1', 'ug_2': 'comp_2'})
@@ -68,6 +70,7 @@ class Fetcher():
                 return mwu_measures
         elif len(split_ngram) == 3:
             big_1 = ' '.join([ug_1, ug_2])
+            ug_3 = split_ngram[2]
             first_mwu = self.bigram_scores[mode].loc[(self.bigram_scores[mode].ug_1 == ug_1) & (self.bigram_scores[mode].ug_2 == ug_2)]
             first_mwu = first_mwu.rename(columns={'ug_1': 'comp_1', 'ug_2': 'comp_2'})
             second_mwu = self.trigram_scores[mode].loc[(self.trigram_scores[mode].big_1 == big_1) & (self.trigram_scores[mode].ug_3 == ug_3)]
@@ -91,9 +94,7 @@ class Fetcher():
                 print(f"No data for fourgram {ngram}")
                 return None
             else:
-                return pd.concat([first_mwu, second_mwu, third_mwu], axis=0).reset_index(drop=True)
-
-
+                return pd.concat([first_mwu, second_mwu, third_mwu], axis=0).reset_index(drop=True)    
     def weight_measures(self, mwu_measures, weight_dict=default_weights):
         for col in mwu_measures.columns:
             if col in weight_dict.keys():
@@ -132,6 +133,7 @@ class Fetcher():
         bigrams = pd.DataFrame(bigrams, columns=['ug_1', 'ug_2'])
         trigrams = pd.DataFrame(trigrams, columns=['big_1', 'ug_3'])
         fourgrams = pd.DataFrame(fourgrams, columns=['trig_1', 'ug_4'])
+
         if normalized:
             mode = 'normalized'
         else:
@@ -139,6 +141,7 @@ class Fetcher():
         bigram_scores = pd.merge(self.bigram_scores[mode], bigrams, how='inner')
         trigram_scores = pd.merge(self.trigram_scores[mode], trigrams, how='inner')
         fourgram_scores = pd.merge(self.fourgram_scores[mode], fourgrams, how='inner')
+
         bigram_scores = bigram_scores.rename(columns={'ug_1': 'comp_1', 'ug_2': 'comp_2'})
         trigram_scores = trigram_scores.rename(columns={'big_1': 'comp_1', 'ug_3' : 'comp_2'})
         fourgram_scores = fourgram_scores.rename(columns={'trig_1': 'comp_1', 'ug_4' : 'comp_2'})
@@ -148,8 +151,15 @@ class Fetcher():
     def get_score_batch(self, ngrams, weights = default_weights, from_text=False, normalized=True):
         self.create_scores(ngrams)
         this_measure = self.get_measures_batch(ngrams, normalized=normalized, from_text=from_text)
-        weighted = self.weight_measures(this_measure, weights)
-        mwu_score = weighted.drop('ngram_length', axis=1).sum(axis=1, numeric_only=True)
-        weighted['mwu_score'] = mwu_score
-        weighted['ngram'] = weighted['comp_1'] + ' ' + weighted['comp_2']
-        return (weighted[['ngram', 'comp_1', 'comp_2', 'mwu_score', 'ngram_length']], this_measure)
+        if normalized:
+            raw_vars = this_measure[['token_freq', 'dispersion', 'type_1', 'type_2', 'entropy_1', 'entropy_2', 'fw_assoc', 'bw_assoc']]
+            mwu_score = np.average(raw_vars, axis=1, weights=weights)
+            print(len(mwu_score))
+            # self.weight_measures(this_measure, weights)
+            # mwu_score = weighted.drop('ngram_length', axis=1).sum(axis=1, numeric_only=True)
+            this_measure['mwu_score'] = mwu_score
+            this_measure['ngram'] = this_measure['comp_1'] + ' ' + this_measure['comp_2']
+            return (this_measure[['ngram', 'comp_1', 'comp_2', 'mwu_score', 'ngram_length']], this_measure)
+        else:
+            this_measure['ngram'] = this_measure['comp_1'] + ' ' + this_measure['comp_2']
+            return(this_measure)
