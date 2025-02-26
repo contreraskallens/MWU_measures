@@ -16,7 +16,7 @@ class Corpus():
             with duckdb.connect(self.path) as conn:
                 conn.execute(
                     """
-                    CREATE TABLE trigram_db_temp (
+                    CREATE TABLE ngram_db_temp (
                         corpus TEXT,
                         ug_1 UINT64,
                         ug_2 UINT64,
@@ -47,15 +47,15 @@ class Corpus():
             return query.fetch_df()
     def add_chunk(self, ngram_lists):
         with duckdb.connect(self.path) as conn:
-            chunk_unigrams, chunk_trigrams = ngram_lists
+            chunk_unigrams, chunk_ngrams = ngram_lists
             chunk_unigrams = pd.DataFrame(chunk_unigrams, columns=['corpus', 'ug', 'freq'])
             chunk_unigrams['corpus'] = chunk_unigrams['corpus'].astype(str)
-            chunk_trigrams = pd.DataFrame(chunk_trigrams, columns=['corpus', 'ug_1', 'ug_2', 'ug_3', 'ug_4', 'freq'])
-            chunk_trigrams['corpus'] = chunk_trigrams['corpus'].astype(str)
-            chunk_trigrams['big_1'] = chunk_trigrams['ug_1'] + ' ' + chunk_trigrams['ug_2']
-            chunk_trigrams['trig_1'] = chunk_trigrams['big_1'] + ' ' + chunk_trigrams['ug_3']
+            chunk_ngrams = pd.DataFrame(chunk_ngrams, columns=['corpus', 'ug_1', 'ug_2', 'ug_3', 'ug_4', 'freq'])
+            chunk_ngrams['corpus'] = chunk_ngrams['corpus'].astype(str)
+            chunk_ngrams['big_1'] = chunk_ngrams['ug_1'] + ' ' + chunk_ngrams['ug_2']
+            chunk_ngrams['trig_1'] = chunk_ngrams['big_1'] + ' ' + chunk_ngrams['ug_3']
             conn.register("unigram_df", chunk_unigrams)
-            conn.register("trigram_df", chunk_trigrams)
+            conn.register("ngram_df", chunk_ngrams)
             
             conn.execute(
                 """
@@ -70,7 +70,7 @@ class Corpus():
             """)
             conn.execute(
                 """
-                CREATE OR REPLACE TEMPORARY TABLE chunk_trigrams AS (
+                CREATE OR REPLACE TEMPORARY TABLE chunk_ngrams AS (
                     SELECT 
                         corpus,
                         HASH(ug_1) AS ug_1,
@@ -80,13 +80,13 @@ class Corpus():
                         HASH(big_1) AS big_1,
                         HASH(trig_1) AS trig_1,
                         freq
-                    FROM trigram_df
+                    FROM ngram_df
                 )
             """)
             conn.execute(
                 """
-                INSERT INTO trigram_db_temp
-                SELECT * from chunk_trigrams
+                INSERT INTO ngram_db_temp
+                SELECT * from chunk_ngrams
             """)
             conn.execute(
                 """
@@ -97,18 +97,17 @@ class Corpus():
         with duckdb.connect(self.path) as conn:
             conn.execute(f"SET threads TO {os.cpu_count() - 1}")
             conn.execute("SET memory_limit='60GB'")
-            all_corpora_names = conn.execute("SELECT DISTINCT corpus FROM trigram_db_temp").fetchall()
+            all_corpora_names = conn.execute("SELECT DISTINCT corpus FROM ngram_db_temp").fetchall()
             all_corpora_str = ["'" + str(corpus_list[0]) + "'" for corpus_list in all_corpora_names]
             all_corpora = ", ".join(all_corpora_str)
-            print('here')
             conn.execute(
                 f"""COPY (
                         SELECT * 
-                        FROM trigram_db_temp
+                        FROM ngram_db_temp
                         PIVOT(
                             SUM(freq) FOR corpus IN ({all_corpora})
                             )
-                    ) TO '{self.temp}trigram_db_raw.parquet' (FORMAT PARQUET)
+                    ) TO '{self.temp}ngram_db_raw.parquet' (FORMAT PARQUET)
             """)
             conn.execute(
                 f"""CREATE OR REPLACE TABLE unigram_db AS (
@@ -119,11 +118,10 @@ class Corpus():
                     )
                 )
             """)
-            conn.execute("DROP TABLE trigram_db_temp")
+            conn.execute("DROP TABLE ngram_db_temp")
             conn.execute("DROP TABLE unigram_db_temp")
             conn.execute("VACUUM ANALYZE")
             # Replace NA with 0
-            print('here 3')
             conn.execute(f"""
                 COPY (
                     SELECT 
@@ -134,21 +132,19 @@ class Corpus():
                         big_1,
                         trig_1,
                         COALESCE(COLUMNS(* EXCLUDE(ug_1, ug_2, ug_3, ug_4, big_1, trig_1)), 0)
-                    FROM '{self.temp}trigram_db_raw.parquet'
-                ) TO '{self.temp}trigram_db_coalesced.parquet' (FORMAT PARQUET) """)
-            print('here 4')
+                    FROM '{self.temp}ngram_db_raw.parquet'
+                ) TO '{self.temp}ngram_db_coalesced.parquet' (FORMAT PARQUET) """)
             # Add column with total frequency
             conn.execute(f"""
                 COPY (
                     SELECT *, 
                     LIST_SUM(LIST_VALUE(*COLUMNS(* EXCLUDE (ug_1, ug_2, ug_3, ug_4, big_1, trig_1)))) AS freq
-                    FROM '{self.temp}trigram_db_coalesced.parquet'
-                ) TO '{self.temp}trigram_db_freq.parquet' (FORMAT PARQUET)""")
+                    FROM '{self.temp}ngram_db_coalesced.parquet'
+                ) TO '{self.temp}ngram_db_freq.parquet' (FORMAT PARQUET)""")
             all_corpora_refs = [name[0] for name in all_corpora_names]
             corpus_query = [f"SUM({X}) AS {X}" for X in all_corpora_refs]   
             corpus_query = ',\n'.join(corpus_query)
             corpus_query = corpus_query + ',\nSUM(freq) as freq\n'
-            print('here 5')
             conn.execute(f"""
                 COPY (
                     SELECT 
@@ -159,16 +155,14 @@ class Corpus():
                         big_1,
                         trig_1,
                         {corpus_query} 
-                    FROM '{self.temp}trigram_db_freq.parquet'
+                    FROM '{self.temp}ngram_db_freq.parquet'
                     GROUP BY ug_1, ug_2, ug_3, ug_4, big_1, trig_1
-                ) TO '{self.temp}trigram_db_summed.parquet' (FORMAT PARQUET)""")
-            print('here 6')
+                ) TO '{self.temp}ngram_db_summed.parquet' (FORMAT PARQUET)""")
             conn.execute("""
                 CREATE OR REPLACE TABLE unigram_db AS (
                 SELECT ug, ug_hash, COALESCE(COLUMNS(* EXCLUDE(ug, ug_hash)), 0)
                 FROM unigram_db
             )""")
-            print('here 7')
             conn.execute("""
                 CREATE OR REPLACE TABLE unigram_db AS (
                     SELECT 
@@ -177,7 +171,6 @@ class Corpus():
                     AS freq 
                     FROM unigram_db
                 )""")
-            print('here 8')
             conn.execute(f"""
                 CREATE OR REPLACE TABLE unigram_db AS (
                     SELECT *
@@ -191,20 +184,17 @@ class Corpus():
                     WHERE freq <= {threshold}
                 )""")
             # Filter on threshold and clean dummy trigrams
-            print('here 9')
             conn.execute(f"""
                 COPY (
                     SELECT *
-                    FROM '{self.temp}trigram_db_summed.parquet'
+                    FROM '{self.temp}ngram_db_summed.parquet'
                     WHERE 
                         ug_1 != HASH('END')
                         AND ug_2 != HASH('END')
                     ORDER BY ug_1, ug_2, ug_3, ug_4
-                ) TO 'mwu_measures/db/{self.corpus_name}_ngrams.parquet' (FORMAT PARQUET)""")
+                ) TO 'mwu_measures/db/{self.corpus_name}_ngrams.parquet' (FORMAT PARQUET, CODEC 'zstd', COMPRESSION_LEVEL 10)""")
             conn.execute("VACUUM ANALYZE")
             print('Deleting temporary files...')
-# TODO: take whole workflow to parquet????? Use directories of parquet files for each corpus instead of .db files?
-# TODO: SORTING takes a looooooooooooong time.
             for file_name in os.listdir(self.temp):
                 print(file_name)
                 file_path = os.path.join(self.temp, file_name)
