@@ -381,16 +381,19 @@ class Corpus():
         """)
             conn.execute(
             f"""
-            CREATE OR REPLACE TABLE filtered_db AS (
-            WITH filtered_freqs AS (
+            CREATE OR REPLACE TEMPORARY TABLE filtered_freqs AS  (
                 SELECT
                     *
-                FROM '{self.ngram_db}'
-                WHERE
-                    {source} IN (SELECT {source} FROM reduced_query) OR 
-                    {target} IN (SELECT {target} FROM reduced_query) 
-                ORDER BY {source}, {target}
+                FROM reduced_query
+                INNER JOIN
+                    '{self.ngram_db}'
+                USING ({source}, {target})
+                ORDER BY ({source}, {target})
             )
+        """)
+            conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE filtered_db AS (
             SELECT
                 {source},
                 {target},
